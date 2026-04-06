@@ -34,7 +34,7 @@ if "authenticated" not in st.session_state:
 if not st.session_state.get("authenticated"):
     st.stop()
 
-st.title("📍 Rotas de Equipes em Campo")
+st.title("📍 Rotas de Equipes")
 
 if st.sidebar.button("Sair"):
     st.session_state.pop("authenticated", None)
@@ -308,7 +308,7 @@ try:
                 )
 
                 folium.Marker(
-                    location=[row[COL_LAT], row[COL_LON]],
+                    location=[float(row[COL_LON]), float(row[COL_LAT])],
                     popup=popup,
                     icon=icone_customizado
                 ).add_to(mapa)
@@ -324,6 +324,4 @@ try:
             st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
 
 except Exception as e:
-    import traceback
-    st.error(f"Erro interno: {e}")
-    st.code(traceback.format_exc())
+    st.error("Erro interno ao processar os dados.")
