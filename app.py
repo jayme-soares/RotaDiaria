@@ -5,7 +5,6 @@ from streamlit_folium import st_folium
 import matplotlib.colors as mcolors
 import sqlite3
 import os
-import json
 import html as html_lib
 
 # Configuração da página do Streamlit
@@ -67,9 +66,9 @@ def _carregar_gsheet():
     import gspread
     from google.oauth2.service_account import Credentials
 
-    creds_json = json.loads(st.secrets["gsheet_credentials"])
+    creds_raw = st.secrets["gsheet_credentials"]
     creds = Credentials.from_service_account_info(
-        creds_json,
+        creds_raw,
         scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
     )
     client = gspread.authorize(creds)
