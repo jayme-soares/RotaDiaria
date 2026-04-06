@@ -325,4 +325,6 @@ try:
             st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
 
 except Exception as e:
-    st.error("Erro interno ao processar os dados.")
+    import traceback
+    st.error(f"Erro interno: {e}")
+    st.code(traceback.format_exc())
