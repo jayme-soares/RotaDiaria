@@ -308,7 +308,7 @@ try:
                 )
 
                 folium.Marker(
-                    location=[float(row[COL_LON]), float(row[COL_LAT])],
+                    location=[row[COL_LAT], row[COL_LON]],
                     popup=popup,
                     icon=icone_customizado
                 ).add_to(mapa)
