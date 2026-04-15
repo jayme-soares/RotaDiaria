@@ -167,7 +167,13 @@ def _padronizar_designados(df_raw):
     col_equipe = _selecionar_coluna(df_raw, ["Equipe", "Recurso", "Equipe Designada", "recurso/equipe", "recursoequipe"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["equipe"])
     col_tipo = _selecionar_coluna(df_raw, ["Tipo TdC", "Setor", "Tipo Serviço", "tipo_servico", "tipo de servico"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["tipo"])
     col_estado = _selecionar_coluna(df_raw, ["Estado", "Stato"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["estado"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["stato"])
-    col_data = _selecionar_coluna(df_raw, ["Data", "Data Início", "Data início execução", "data_inicio_execucao", "data início"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
+    col_data = _selecionar_coluna(
+        df_raw,
+        [
+            "Data início Escalonamento", "Data Inicio Escalonamento", "data_inicio_escalonamento",
+            "Data", "Data Início", "Data início execução", "data_inicio_execucao", "data início"
+        ]
+    ) or _selecionar_coluna_fuzzy(df_raw, inclui=["datainicioescalonamento"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
     col_cliente = _selecionar_coluna(df_raw, ["Código Cliente", "Codigo Cliente", "cod_cliente", "cliente_codigo", "Cliente ID"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "cliente"])
     col_endereco = _selecionar_coluna(df_raw, ["Endereço", "Endereco", "Logradouro", "endereco completo"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["logradouro"])
     col_lat = _selecionar_coluna(df_raw, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
