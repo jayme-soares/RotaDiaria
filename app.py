@@ -85,6 +85,157 @@ def _aplicar_tramites(df):
     return df
 
 
+def _normalizar_nome_coluna(nome):
+    texto = str(nome).strip().lower()
+    mapa = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
+    texto = texto.translate(mapa)
+    return "".join(ch for ch in texto if ch.isalnum())
+
+
+def _selecionar_coluna(df, aliases):
+    colunas_norm = {_normalizar_nome_coluna(c): c for c in df.columns}
+    for alias in aliases:
+        col = colunas_norm.get(_normalizar_nome_coluna(alias))
+        if col:
+            return col
+    return None
+
+
+def _selecionar_coluna_fuzzy(df, inclui=None, exclui=None):
+    inclui = inclui or []
+    exclui = exclui or []
+    for col in df.columns:
+        norm = _normalizar_nome_coluna(col)
+        if all(token in norm for token in inclui) and all(token not in norm for token in exclui):
+            return col
+    return None
+
+
+def _parse_data_flexivel(serie):
+    data_dmy = pd.to_datetime(serie, dayfirst=True, errors="coerce")
+    faltantes = data_dmy.isna()
+    if faltantes.any():
+        data_ymd = pd.to_datetime(serie[faltantes], dayfirst=False, errors="coerce")
+        data_dmy.loc[faltantes] = data_ymd
+    return data_dmy
+
+
+def _normalizar_texto_filtro(valor):
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip().lower()
+    mapa = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
+    texto = texto.translate(mapa)
+    return "".join(ch for ch in texto if ch.isalnum())
+
+
+def _normalizar_chave_codigo(valor):
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip()
+    if texto.endswith(".0"):
+        texto = texto[:-2]
+    return _normalizar_nome_coluna(texto)
+
+
+def _colunas_padrao_designados():
+    return ['Código TdC', 'Código Cliente', 'Equipe Designada', 'Tipo Serviço', 'Data', 'Endereço', 'Latitude', 'Longitude']
+
+
+def _padronizar_designados(df_raw):
+    if df_raw.empty:
+        return pd.DataFrame(columns=_colunas_padrao_designados())
+
+    col_id = _selecionar_coluna(df_raw, ["Código TdC", "codigo_tdc", "codigo tdc"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "tdc"])
+    col_equipe = _selecionar_coluna(df_raw, ["Equipe", "Recurso", "Equipe Designada", "recurso/equipe", "recursoequipe"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["equipe"])
+    col_tipo = _selecionar_coluna(df_raw, ["Tipo TdC", "Setor", "Tipo Serviço", "tipo_servico", "tipo de servico"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["tipo"])
+    col_data = _selecionar_coluna(df_raw, ["Data", "Data Início", "Data início execução", "data_inicio_execucao", "data início"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
+    col_cliente = _selecionar_coluna(df_raw, ["Código Cliente", "Codigo Cliente", "cod_cliente", "cliente_codigo", "Cliente ID"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "cliente"])
+    col_endereco = _selecionar_coluna(df_raw, ["Endereço", "Endereco", "Logradouro", "endereco completo"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["logradouro"])
+    col_lat = _selecionar_coluna(df_raw, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
+    col_lon = _selecionar_coluna(df_raw, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["long"])
+
+    df = pd.DataFrame()
+    df['Código TdC'] = df_raw[col_id] if col_id else ""
+    df['Código Cliente'] = df_raw[col_cliente] if col_cliente else ""
+    df['Equipe Designada'] = df_raw[col_equipe] if col_equipe else ""
+    df['Tipo Serviço'] = df_raw[col_tipo] if col_tipo else ""
+    df['Data'] = df_raw[col_data] if col_data else ""
+    df['Endereço'] = df_raw[col_endereco] if col_endereco else ""
+    df['Latitude'] = pd.to_numeric(df_raw[col_lat], errors="coerce") if col_lat else pd.NA
+    df['Longitude'] = pd.to_numeric(df_raw[col_lon], errors="coerce") if col_lon else pd.NA
+    return df
+
+
+def _carregar_designados_local():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df_raw = pd.read_sql_query("SELECT * FROM base_designados", conn)
+    except pd.errors.DatabaseError:
+        return pd.DataFrame(columns=_colunas_padrao_designados())
+    finally:
+        conn.close()
+    return _padronizar_designados(df_raw)
+
+
+def _colunas_padrao_coordenadas():
+    return ['Instalação', 'Latitude', 'Longitude']
+
+
+def _padronizar_coordenadas(df_raw):
+    if df_raw.empty:
+        return pd.DataFrame(columns=_colunas_padrao_coordenadas())
+
+    col_instalacao = _selecionar_coluna(df_raw, ["Instalação", "Instalacao", "codigo_cliente", "Código Cliente"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["instala"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["cliente"])
+    col_lat = _selecionar_coluna(df_raw, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
+    col_lon = _selecionar_coluna(df_raw, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["long"])
+
+    df = pd.DataFrame()
+    df['Instalação'] = df_raw[col_instalacao] if col_instalacao else ""
+    df['Latitude'] = pd.to_numeric(df_raw[col_lat], errors="coerce") if col_lat else pd.NA
+    df['Longitude'] = pd.to_numeric(df_raw[col_lon], errors="coerce") if col_lon else pd.NA
+    return df
+
+
+def _carregar_coordenadas_local():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df_raw = pd.read_sql_query("SELECT * FROM base_coordenadas", conn)
+    except pd.errors.DatabaseError:
+        return pd.DataFrame(columns=_colunas_padrao_coordenadas())
+    finally:
+        conn.close()
+    return _padronizar_coordenadas(df_raw)
+
+
+def _vincular_coordenadas_designados(df_designados, df_coordenadas):
+    if df_designados.empty or df_coordenadas.empty:
+        return df_designados
+
+    designados = df_designados.copy()
+    coordenadas = df_coordenadas.copy()
+
+    designados["_chave_cliente"] = designados["Código Cliente"].apply(_normalizar_chave_codigo)
+    coordenadas["_chave_cliente"] = coordenadas["Instalação"].apply(_normalizar_chave_codigo)
+
+    coords_validas = coordenadas[
+        (coordenadas["_chave_cliente"] != "") &
+        coordenadas["Latitude"].notna() &
+        coordenadas["Longitude"].notna()
+    ].copy()
+    coords_validas = coords_validas.drop_duplicates(subset=["_chave_cliente"], keep="first")
+    coords_validas = coords_validas.rename(columns={"Latitude": "Latitude Coord", "Longitude": "Longitude Coord"})
+
+    df_merge = designados.merge(
+        coords_validas[["_chave_cliente", "Latitude Coord", "Longitude Coord"]],
+        on="_chave_cliente",
+        how="left"
+    )
+    df_merge["Latitude"] = df_merge["Latitude"].fillna(df_merge["Latitude Coord"])
+    df_merge["Longitude"] = df_merge["Longitude"].fillna(df_merge["Longitude Coord"])
+    return df_merge.drop(columns=["_chave_cliente", "Latitude Coord", "Longitude Coord"])
+
+
 @st.cache_data(ttl=3600)
 def carregar_dados():
     if "gsheet_id" in st.secrets:
@@ -92,11 +243,13 @@ def carregar_dados():
     else:
         df = _carregar_local()
     df = _aplicar_tramites(df)
-    return df
+    df_designados = _carregar_designados_local()
+    df_coordenadas = _carregar_coordenadas_local()
+    return df, df_designados, df_coordenadas
 
 
 try:
-    df = carregar_dados()
+    df, df_designados, df_coordenadas = carregar_dados()
 
     COL_ID = 'Código TdC'
     COL_EQUIPE = 'Equipe'
@@ -110,10 +263,23 @@ try:
     COL_SETOR = 'Tipo TdC'
     COL_TRAMITE = 'Tramite'
     COL_CAUSA = 'Causa/Descritivo Resultado'
+    COL_D_ID = 'Código TdC'
+    COL_D_CLIENTE = 'Código Cliente'
+    COL_D_EQUIPE = 'Equipe Designada'
+    COL_D_TIPO = 'Tipo Serviço'
+    COL_D_DATA = 'Data'
+    COL_D_ENDERECO = 'Endereço'
+    COL_D_LAT = 'Latitude'
+    COL_D_LON = 'Longitude'
 
     # Dados
     df[COL_LAT] = pd.to_numeric(df[COL_LAT], errors="coerce")
     df[COL_LON] = pd.to_numeric(df[COL_LON], errors="coerce")
+    df_designados[COL_D_LAT] = pd.to_numeric(df_designados[COL_D_LAT], errors="coerce")
+    df_designados[COL_D_LON] = pd.to_numeric(df_designados[COL_D_LON], errors="coerce")
+    df_designados = _vincular_coordenadas_designados(df_designados, df_coordenadas)
+    df_designados[COL_D_LAT] = pd.to_numeric(df_designados[COL_D_LAT], errors="coerce")
+    df_designados[COL_D_LON] = pd.to_numeric(df_designados[COL_D_LON], errors="coerce")
 
     def separar_data_hora(valor):
         if pd.isna(valor):
@@ -130,24 +296,35 @@ try:
     df["Data_BR"] = pd.to_datetime(df["Data_Crua"], dayfirst=True, errors="coerce").dt.strftime("%d/%m/%Y")
     df["Mes"] = pd.to_datetime(df["Data_Crua"], dayfirst=True, errors="coerce").dt.to_period("M").astype(str)
 
+    df_designados["DataHora"] = _parse_data_flexivel(df_designados[COL_D_DATA])
+    df_designados["Data_BR"] = df_designados["DataHora"].dt.strftime("%d/%m/%Y")
+    df_designados["Mes"] = df_designados["DataHora"].dt.to_period("M").astype(str)
+
     df[COL_HORA_INI] = df[COL_HORA_INI].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
     df[COL_HORA_FIM] = df[COL_HORA_FIM].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
 
     # Filtros
     st.sidebar.header("🔍 Filtros")
 
-    meses_disponiveis = sorted(df["Mes"].dropna().unique().tolist())
+    meses_disponiveis = sorted(
+        set(df["Mes"].dropna().tolist() + df_designados["Mes"].dropna().tolist()) - {"NaT"}
+    )
     meses_labels = [f"{m.split('-')[1]}/{m.split('-')[0]}" for m in meses_disponiveis]
     mes_map = dict(zip(meses_labels, meses_disponiveis))
     mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels)
     mes_selecionado = mes_map[mes_selecionado_label]
 
     df_mes = df[df["Mes"] == mes_selecionado]
+    df_designados_mes = df_designados[df_designados["Mes"] == mes_selecionado]
 
-    datas_ordenadas = df_mes.dropna(subset=["Data_BR"]).sort_values("DataHora")["Data_BR"].unique().tolist()
+    datas_ordenadas = sorted(
+        set(df_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist() + df_designados_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist()),
+        key=lambda x: pd.to_datetime(x, dayfirst=True, errors="coerce")
+    )
     data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas)
 
     df_f1 = df_mes[df_mes["Data_BR"] == data_selecionada]
+    df_designados_f1 = df_designados_mes[df_designados_mes["Data_BR"] == data_selecionada]
 
     st.sidebar.markdown("---")
 
@@ -181,12 +358,49 @@ try:
     df_filtrado = df_filtrado.dropna(subset=[COL_LAT, COL_LON])
     df_filtrado = df_filtrado.sort_values(by=[COL_EQUIPE, "DataHora"])
 
-    if df_filtrado.empty:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🗂️ Designados")
+    exibir_designados = st.sidebar.checkbox("Exibir camada de designados", value=True)
+
+    # Designados seguem os filtros existentes: data selecionada + equipes selecionadas.
+    # Não aplicamos filtro por setor/tipo para preservar todos os designados da equipe no dia.
+    equipes_norm = {_normalizar_texto_filtro(e) for e in equipes_selecionadas if str(e).strip()}
+    df_designados_tmp = df_designados_f1.copy()
+    df_designados_tmp["_equipe_norm"] = df_designados_tmp[COL_D_EQUIPE].apply(_normalizar_texto_filtro)
+    if equipes_norm:
+        df_designados_filtrado = df_designados_tmp[
+            df_designados_tmp["_equipe_norm"].apply(
+                lambda equipe: any(
+                    equipe == alvo or equipe.startswith(alvo) or alvo.startswith(equipe)
+                    for alvo in equipes_norm
+                )
+            )
+        ].drop(columns=["_equipe_norm"])
+    else:
+        df_designados_filtrado = df_designados_tmp.iloc[0:0].drop(columns=["_equipe_norm"])
+    total_designados_filtrados = len(df_designados_filtrado)
+    designados_com_coord = 0
+    if exibir_designados and not df_designados_filtrado.empty:
+        designados_com_coord = int(df_designados_filtrado[[COL_D_LAT, COL_D_LON]].notna().all(axis=1).sum())
+        df_designados_filtrado = df_designados_filtrado.dropna(subset=[COL_D_LAT, COL_D_LON])
+
+    if df_filtrado.empty and (not exibir_designados or df_designados_filtrado.empty):
         st.warning("Nenhum dado encontrado com os filtros selecionados.")
     else:
-        centro_lat = df_filtrado[COL_LAT].mean()
-        centro_lon = df_filtrado[COL_LON].mean()
+        latitudes = []
+        longitudes = []
+        if not df_filtrado.empty:
+            latitudes.extend(df_filtrado[COL_LAT].tolist())
+            longitudes.extend(df_filtrado[COL_LON].tolist())
+        if exibir_designados and not df_designados_filtrado.empty:
+            latitudes.extend(df_designados_filtrado[COL_D_LAT].tolist())
+            longitudes.extend(df_designados_filtrado[COL_D_LON].tolist())
+
+        centro_lat = sum(latitudes) / len(latitudes)
+        centro_lon = sum(longitudes) / len(longitudes)
         mapa = folium.Map(location=[centro_lat, centro_lon], zoom_start=13)
+        camada_exec = folium.FeatureGroup(name="✅ Serviços executados", show=True)
+        camada_designados = folium.FeatureGroup(name="🗂️ Serviços designados", show=True)
 
         cores_equipe = ["#1f77b4", "#9467bd", "#ff7f0e", "#8c564b", "#e377c2", "#17becf", "#7f7f7f", "#bcbd22"]
 
@@ -205,19 +419,19 @@ try:
                 folium.PolyLine(
                     coordenadas_rota, color=cor_linha_equipe, weight=4, opacity=0.8,
                     tooltip=f"Rota: {nome_equipe}"
-                ).add_to(mapa)
+                ).add_to(camada_exec)
 
                 folium.Marker(
                     location=coordenadas_rota[0],
                     tooltip=f"🟢 INÍCIO DA ROTA - {nome_equipe}",
                     icon=folium.Icon(color="green", icon="play")
-                ).add_to(mapa)
+                ).add_to(camada_exec)
 
                 folium.Marker(
                     location=coordenadas_rota[-1],
                     tooltip=f"🏁 FIM DA ROTA - {nome_equipe}",
                     icon=folium.Icon(color="black", icon="stop")
-                ).add_to(mapa)
+                ).add_to(camada_exec)
 
             for _, row in dados_equipe.iterrows():
                 codigo_td = html_lib.escape(str(row[COL_ID]).split(".")[0], quote=True)
@@ -311,17 +525,96 @@ try:
                     location=[row[COL_LAT], row[COL_LON]],
                     popup=popup,
                     icon=icone_customizado
-                ).add_to(mapa)
+                ).add_to(camada_exec)
+
+        if exibir_designados and not df_designados_filtrado.empty:
+            for _, row in df_designados_filtrado.iterrows():
+                codigo_td = html_lib.escape(str(row[COL_D_ID]).split(".")[0], quote=True)
+                equipe_html = html_lib.escape(str(row[COL_D_EQUIPE]), quote=True)
+                data_html = html_lib.escape(str(row["Data_BR"]), quote=True)
+                tipo_html = html_lib.escape(str(row[COL_D_TIPO]), quote=True)
+                endereco_html = html_lib.escape(str(row[COL_D_ENDERECO]), quote=True)
+
+                popup_designado_html = f"""
+                <div style="width: 260px; font-family: Arial, sans-serif;">
+                    <h4 style="margin-top: 0; color: #7f7f7f;">Serviço Designado</h4>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <tr style="border-bottom: 1px solid #ddd; background-color: #f8f9fa;">
+                            <td style="padding: 4px; font-weight: bold;">Código TdC:</td>
+                            <td style="padding: 4px;">{codigo_td}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 4px; font-weight: bold;">Equipe:</td>
+                            <td style="padding: 4px;">{equipe_html}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 4px; font-weight: bold;">Data:</td>
+                            <td style="padding: 4px;">{data_html}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 4px; font-weight: bold;">Tipo Serviço:</td>
+                            <td style="padding: 4px;">{tipo_html}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 4px; font-weight: bold;">Endereço:</td>
+                            <td style="padding: 4px;">{endereco_html}</td>
+                        </tr>
+                    </table>
+                </div>
+                """
+                popup_designado = folium.Popup(popup_designado_html, max_width=320)
+                icone_designado = folium.DivIcon(
+                    html=f"""
+                    <div style="
+                        background-color: #7f7f7f;
+                        color: white;
+                        border-radius: 50%;
+                        width: 30px;
+                        height: 30px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-weight: bold;
+                        font-size: 10px;
+                        border: 3px solid #f1c40f;
+                        box-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+                    ">
+                        {codigo_td}
+                    </div>
+                    """
+                )
+
+                folium.Marker(
+                    location=[row[COL_D_LAT], row[COL_D_LON]],
+                    popup=popup_designado,
+                    tooltip=f"Designado: {codigo_td}",
+                    icon=icone_designado
+                ).add_to(camada_designados)
+
+        camada_exec.add_to(mapa)
+        if exibir_designados:
+            camada_designados.add_to(mapa)
+        folium.LayerControl(collapsed=False).add_to(mapa)
 
         st.markdown("""
-        **Legenda do Mapa:** 📍 Fundo Verde: Realizado | 📍 Fundo Vermelho: Não Realizado | 🟢 Pino: Início da Rota | 🏁 Pino Preto: Fim da Rota
+        **Legenda do Mapa:** 📍 Fundo Verde: Realizado | 📍 Fundo Vermelho: Não Realizado | ⚪ Fundo Cinza: Designado |
+        🟢 Pino: Início da Rota | 🏁 Pino Preto: Fim da Rota
         *(A borda externa dos círculos muda de cor de acordo com o Setor/Tipo TdC)*
         """)
+        if exibir_designados:
+            st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
 
         st_folium(mapa, width=1200, height=650)
 
         with st.expander("Ver Tabela de Dados Filtrados"):
             st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
+
+        if exibir_designados:
+            with st.expander("Ver Tabela de Serviços Designados"):
+                st.dataframe(
+                    df_designados_filtrado[[COL_D_ID, COL_D_EQUIPE, "Data_BR", COL_D_TIPO, COL_D_ENDERECO]],
+                    use_container_width=True
+                )
 
 except Exception as e:
     st.error("Erro interno ao processar os dados.")
