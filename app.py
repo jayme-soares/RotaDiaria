@@ -156,7 +156,7 @@ def _normalizar_chave_codigo(valor):
 
 
 def _colunas_padrao_designados():
-    return ['Código TdC', 'Código Cliente', 'Equipe Designada', 'Tipo Serviço', 'Data', 'Endereço', 'Latitude', 'Longitude']
+    return ['Código TdC', 'Código Cliente', 'Equipe Designada', 'Tipo Serviço', 'Estado', 'Data', 'Endereço', 'Latitude', 'Longitude']
 
 
 def _padronizar_designados(df_raw):
@@ -166,6 +166,7 @@ def _padronizar_designados(df_raw):
     col_id = _selecionar_coluna(df_raw, ["Código TdC", "codigo_tdc", "codigo tdc"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "tdc"])
     col_equipe = _selecionar_coluna(df_raw, ["Equipe", "Recurso", "Equipe Designada", "recurso/equipe", "recursoequipe"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["equipe"])
     col_tipo = _selecionar_coluna(df_raw, ["Tipo TdC", "Setor", "Tipo Serviço", "tipo_servico", "tipo de servico"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["tipo"])
+    col_estado = _selecionar_coluna(df_raw, ["Estado", "Stato"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["estado"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["stato"])
     col_data = _selecionar_coluna(df_raw, ["Data", "Data Início", "Data início execução", "data_inicio_execucao", "data início"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
     col_cliente = _selecionar_coluna(df_raw, ["Código Cliente", "Codigo Cliente", "cod_cliente", "cliente_codigo", "Cliente ID"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "cliente"])
     col_endereco = _selecionar_coluna(df_raw, ["Endereço", "Endereco", "Logradouro", "endereco completo"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["logradouro"])
@@ -177,6 +178,7 @@ def _padronizar_designados(df_raw):
     df['Código Cliente'] = df_raw[col_cliente] if col_cliente else ""
     df['Equipe Designada'] = df_raw[col_equipe] if col_equipe else ""
     df['Tipo Serviço'] = df_raw[col_tipo] if col_tipo else ""
+    df['Estado'] = df_raw[col_estado] if col_estado else ""
     df['Data'] = df_raw[col_data] if col_data else ""
     df['Endereço'] = df_raw[col_endereco] if col_endereco else ""
     df['Latitude'] = pd.to_numeric(df_raw[col_lat], errors="coerce") if col_lat else pd.NA
@@ -284,6 +286,7 @@ try:
     COL_D_CLIENTE = 'Código Cliente'
     COL_D_EQUIPE = 'Equipe Designada'
     COL_D_TIPO = 'Tipo Serviço'
+    COL_D_ESTADO = 'Estado'
     COL_D_DATA = 'Data'
     COL_D_ENDERECO = 'Endereço'
     COL_D_LAT = 'Latitude'
@@ -395,6 +398,12 @@ try:
         ].drop(columns=["_equipe_norm"])
     else:
         df_designados_filtrado = df_designados_tmp.iloc[0:0].drop(columns=["_equipe_norm"])
+
+    estados_excluidos = {"esitato", "inesecuzione"}
+    df_designados_filtrado["_estado_norm"] = df_designados_filtrado[COL_D_ESTADO].apply(_normalizar_nome_coluna)
+    df_designados_filtrado = df_designados_filtrado[
+        ~df_designados_filtrado["_estado_norm"].isin(estados_excluidos)
+    ].drop(columns=["_estado_norm"])
     total_designados_filtrados = len(df_designados_filtrado)
     designados_com_coord = 0
     if exibir_designados and not df_designados_filtrado.empty:
