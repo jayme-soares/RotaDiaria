@@ -62,9 +62,18 @@ def _carregar_local():
 
 
 def _carregar_gsheet():
-    """Lê os dados da Google Sheets (para produção no Cloud)."""
+    """Lê dados das abas do Google Sheets (produção no Cloud)."""
     import gspread
     from google.oauth2.service_account import Credentials
+
+    def _valores_para_df(valores):
+        if not valores:
+            return pd.DataFrame()
+        headers = valores[0]
+        rows = valores[1:] if len(valores) > 1 else []
+        width = len(headers)
+        rows_ajustadas = [r[:width] + [""] * max(0, width - len(r)) for r in rows]
+        return pd.DataFrame(rows_ajustadas, columns=headers)
 
     creds_raw = st.secrets["gsheet_credentials"]
     creds = Credentials.from_service_account_info(
@@ -72,9 +81,17 @@ def _carregar_gsheet():
         scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
     )
     client = gspread.authorize(creds)
-    sheet = client.open_by_key(st.secrets["gsheet_id"]).worksheet("dados")
-    records = sheet.get_all_records()
-    return pd.DataFrame(records)
+    spreadsheet = client.open_by_key(st.secrets["gsheet_id"])
+
+    worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+    dados_values = worksheets["dados"].get_all_values() if "dados" in worksheets else []
+    designados_values = worksheets["designados"].get_all_values() if "designados" in worksheets else []
+    coordenadas_values = worksheets["coordenadas"].get_all_values() if "coordenadas" in worksheets else []
+
+    df_dados = _valores_para_df(dados_values)
+    df_designados = _padronizar_designados(_valores_para_df(designados_values))
+    df_coordenadas = _padronizar_coordenadas(_valores_para_df(coordenadas_values))
+    return df_dados, df_designados, df_coordenadas
 
 
 def _aplicar_tramites(df):
@@ -239,12 +256,12 @@ def _vincular_coordenadas_designados(df_designados, df_coordenadas):
 @st.cache_data(ttl=3600)
 def carregar_dados():
     if "gsheet_id" in st.secrets:
-        df = _carregar_gsheet()
+        df, df_designados, df_coordenadas = _carregar_gsheet()
     else:
         df = _carregar_local()
+        df_designados = _carregar_designados_local()
+        df_coordenadas = _carregar_coordenadas_local()
     df = _aplicar_tramites(df)
-    df_designados = _carregar_designados_local()
-    df_coordenadas = _carregar_coordenadas_local()
     return df, df_designados, df_coordenadas
 
 
