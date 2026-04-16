@@ -152,6 +152,40 @@ def _parse_data_flexivel(serie):
     return data_dmy
 
 
+def _carregar_rastro_csv(uploaded_file):
+    try:
+        df_raw = pd.read_csv(uploaded_file, sep=";", dtype=str, encoding="utf-8-sig")
+    except Exception:
+        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude"])
+
+    col_lat = _selecionar_coluna(df_raw, ["Latitude"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
+    col_lon = _selecionar_coluna(df_raw, ["Longitude"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"])
+    col_data = _selecionar_coluna(df_raw, ["Data_Captura", "Data Captura", "Data"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
+
+    if not col_lat or not col_lon or not col_data:
+        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude"])
+
+    df = pd.DataFrame()
+    df["Latitude"] = pd.to_numeric(df_raw[col_lat].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    df["Longitude"] = pd.to_numeric(df_raw[col_lon].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    data_texto = df_raw[col_data].astype(str).str.replace(" - ", " ", regex=False).str.strip()
+    df["DataHora"] = pd.to_datetime(data_texto, dayfirst=True, errors="coerce")
+    df["Data_BR"] = df["DataHora"].dt.strftime("%d/%m/%Y")
+
+    df = df.dropna(subset=["Latitude", "Longitude", "DataHora"]).sort_values("DataHora")
+    return df
+
+
+def _reduzir_pontos_trajeto_df(df_trajeto, limite=1500):
+    if df_trajeto.empty or len(df_trajeto) <= limite:
+        return df_trajeto
+    passo = max(1, len(df_trajeto) // limite)
+    df_reduzido = df_trajeto.iloc[::passo].copy()
+    if df_reduzido.index[-1] != df_trajeto.index[-1]:
+        df_reduzido = pd.concat([df_reduzido, df_trajeto.iloc[[-1]]])
+    return df_reduzido
+
+
 def _normalizar_texto_filtro(valor):
     if pd.isna(valor):
         return ""
@@ -400,6 +434,46 @@ try:
     df_filtrado = df_filtrado.sort_values(by=[COL_EQUIPE, "DataHora"])
 
     st.sidebar.markdown("---")
+    st.sidebar.subheader("🚗 Rastro do veículo")
+    rastros_processados = []
+    exibir_rastro_veiculo = False
+    total_rastro_pontos = 0
+    total_rastro_arquivos = 0
+    if equipes_selecionadas:
+        arquivos_rastro = st.sidebar.file_uploader(
+            "Importar rastros (.csv) - um ou mais arquivos",
+            type=["csv"],
+            accept_multiple_files=True,
+            key="upload_rastro_csv",
+            help="A opção aparece após selecionar equipe(s). Você pode importar múltiplos arquivos.",
+        )
+        if arquivos_rastro:
+            exibir_rastro_veiculo = st.sidebar.checkbox("Exibir rastro real do veículo", value=True)
+            equipes_norm_map = {_normalizar_texto_filtro(eq): eq for eq in equipes_selecionadas}
+
+            for i, arquivo in enumerate(arquivos_rastro):
+                nome_norm = _normalizar_texto_filtro(arquivo.name)
+                equipe_default = equipes_selecionadas[0]
+                for chave, equipe_nome in equipes_norm_map.items():
+                    if chave and chave in nome_norm:
+                        equipe_default = equipe_nome
+                        break
+                idx_default = equipes_selecionadas.index(equipe_default) if equipe_default in equipes_selecionadas else 0
+                equipe_arquivo = st.sidebar.selectbox(
+                    f"Equipe do arquivo {i + 1}: {arquivo.name}",
+                    options=equipes_selecionadas,
+                    index=idx_default,
+                    key=f"rastro_equipe_{i}",
+                )
+
+                df_rastro = _carregar_rastro_csv(arquivo)
+                df_rastro = df_rastro[df_rastro["Data_BR"] == data_selecionada]
+                if not df_rastro.empty:
+                    rastros_processados.append({"arquivo": arquivo.name, "equipe": equipe_arquivo, "df": df_rastro})
+                    total_rastro_pontos += len(df_rastro)
+            total_rastro_arquivos = len(rastros_processados)
+
+    st.sidebar.markdown("---")
     st.sidebar.subheader("🗂️ Designados")
     exibir_designados = st.sidebar.checkbox("Exibir camada de designados", value=True)
 
@@ -441,7 +515,8 @@ try:
         df_designados_filtrado = df_designados_filtrado.dropna(subset=[COL_D_LAT, COL_D_LON])
     total_designados_filtrados = len(df_designados_filtrado)
 
-    if df_filtrado.empty and (not exibir_designados or df_designados_filtrado.empty):
+    tem_rastro_visivel = exibir_rastro_veiculo and total_rastro_arquivos > 0
+    if df_filtrado.empty and (not exibir_designados or df_designados_filtrado.empty) and not tem_rastro_visivel:
         st.warning("Nenhum dado encontrado com os filtros selecionados.")
     else:
         latitudes = []
@@ -452,12 +527,17 @@ try:
         if exibir_designados and not df_designados_filtrado.empty:
             latitudes.extend(df_designados_filtrado[COL_D_LAT].tolist())
             longitudes.extend(df_designados_filtrado[COL_D_LON].tolist())
+        if tem_rastro_visivel:
+            for rastro in rastros_processados:
+                latitudes.extend(rastro["df"]["Latitude"].tolist())
+                longitudes.extend(rastro["df"]["Longitude"].tolist())
 
         centro_lat = sum(latitudes) / len(latitudes)
         centro_lon = sum(longitudes) / len(longitudes)
         mapa = folium.Map(location=[centro_lat, centro_lon], zoom_start=13)
         camada_exec = folium.FeatureGroup(name="✅ Serviços executados", show=True)
         camada_designados = folium.FeatureGroup(name="🗂️ Serviços designados", show=True)
+        camada_rastro = folium.FeatureGroup(name="🚗 Rastro real do veículo", show=True)
 
         cores_equipe = ["#1f77b4", "#9467bd", "#ff7f0e", "#8c564b", "#e377c2", "#17becf", "#7f7f7f", "#bcbd22"]
 
@@ -648,17 +728,72 @@ try:
                     icon=icone_designado
                 ).add_to(camada_designados)
 
+        if tem_rastro_visivel:
+            for index, rastro in enumerate(rastros_processados):
+                dados_rastro = rastro["df"]
+                nome_equipe = rastro["equipe"]
+                nome_arquivo = rastro["arquivo"]
+                cor_rastro = cores_equipe[(index + 2) % len(cores_equipe)]
+
+                dados_rastro_plot = _reduzir_pontos_trajeto_df(dados_rastro, limite=1500)
+                coordenadas_rastro = dados_rastro_plot[["Latitude", "Longitude"]].values.tolist()
+                if len(coordenadas_rastro) >= 2:
+                    folium.PolyLine(
+                        coordenadas_rastro,
+                        color=cor_rastro,
+                        weight=3,
+                        opacity=0.9,
+                        dash_array="8,6",
+                        tooltip=f"Rastro real: {nome_equipe} ({nome_arquivo})"
+                    ).add_to(camada_rastro)
+
+                for _, ponto in dados_rastro_plot.iterrows():
+                    datahora_txt = ponto["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
+                    folium.CircleMarker(
+                        location=[ponto["Latitude"], ponto["Longitude"]],
+                        radius=2,
+                        color=cor_rastro,
+                        fill=True,
+                        fill_color=cor_rastro,
+                        fill_opacity=0.8,
+                        weight=1,
+                        tooltip=f"{nome_equipe} - {datahora_txt}",
+                        popup=f"{nome_equipe}<br>{datahora_txt}"
+                    ).add_to(camada_rastro)
+
+                if not dados_rastro_plot.empty:
+                    inicio = dados_rastro_plot.iloc[0]
+                    fim = dados_rastro_plot.iloc[-1]
+                    inicio_txt = inicio["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
+                    fim_txt = fim["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
+                    folium.Marker(
+                        location=[inicio["Latitude"], inicio["Longitude"]],
+                        tooltip=f"🚙 Início rastro - {nome_equipe} | {inicio_txt}",
+                        popup=f"Início rastro<br>{nome_equipe}<br>{inicio_txt}",
+                        icon=folium.Icon(color="blue", icon="play")
+                    ).add_to(camada_rastro)
+                    folium.Marker(
+                        location=[fim["Latitude"], fim["Longitude"]],
+                        tooltip=f"🛑 Fim rastro - {nome_equipe} | {fim_txt}",
+                        popup=f"Fim rastro<br>{nome_equipe}<br>{fim_txt}",
+                        icon=folium.Icon(color="blue", icon="stop")
+                    ).add_to(camada_rastro)
+
         camada_exec.add_to(mapa)
         if exibir_designados:
             camada_designados.add_to(mapa)
+        if tem_rastro_visivel:
+            camada_rastro.add_to(mapa)
         folium.LayerControl(collapsed=False).add_to(mapa)
 
         st.markdown("""
         **Legenda do Mapa:** 🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
-        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota
+        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔵 Linha tracejada: Rastro real do veículo | 🔹 Ponto azul: captura com horário
         """)
         if exibir_designados:
-            st.caption(f"Designados fi  ltrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
+            st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
+        if tem_rastro_visivel:
+            st.caption(f"Rastros carregados: {total_rastro_arquivos} arquivo(s) | Pontos: {total_rastro_pontos}")
 
         def _resumo_lista(lista, limite=3):
             itens = [str(x).strip() for x in lista if str(x).strip()]
@@ -675,6 +810,8 @@ try:
         data_txt = html_lib.escape(str(data_selecionada), quote=True)
         qtd_exec_txt = html_lib.escape(str(len(df_filtrado)), quote=True)
         qtd_des_txt = html_lib.escape(str(total_designados_filtrados), quote=True)
+        qtd_rastro_arquivos_txt = html_lib.escape(str(total_rastro_arquivos), quote=True)
+        qtd_rastro_pontos_txt = html_lib.escape(str(total_rastro_pontos), quote=True)
 
         resumo_filtros_html = f"""
         <div style="
@@ -700,6 +837,8 @@ try:
                 <tr><td style="font-weight:bold; padding:2px 4px;">Status</td><td style="padding:2px 4px;">{status_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Serv. executados</td><td style="padding:2px 4px;">{qtd_exec_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Serv. designados (sobra)</td><td style="padding:2px 4px;">{qtd_des_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Rastros carregados</td><td style="padding:2px 4px;">{qtd_rastro_arquivos_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Pontos de rastro</td><td style="padding:2px 4px;">{qtd_rastro_pontos_txt}</td></tr>
             </table>
         </div>
         """
