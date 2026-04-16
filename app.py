@@ -654,12 +654,11 @@ try:
         folium.LayerControl(collapsed=False).add_to(mapa)
 
         st.markdown("""
-        **Legenda do Mapa:** 📍 Fundo Verde: Realizado | 📍 Fundo Vermelho: Não Realizado | ⚪ Fundo Cinza: Designado |
-        🟢 Pino: Início da Rota | 🏁 Pino Preto: Fim da Rota
-        *(A borda externa dos círculos muda de cor de acordo com o Setor/Tipo TdC)*
+        **Legenda do Mapa:** 🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
+        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota
         """)
         if exibir_designados:
-            st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
+            st.caption(f"Designados fi  ltrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
 
         def _resumo_lista(lista, limite=3):
             itens = [str(x).strip() for x in lista if str(x).strip()]
