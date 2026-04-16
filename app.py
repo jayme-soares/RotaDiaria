@@ -373,7 +373,7 @@ try:
     df_f3 = df_f2[df_f2[COL_EQUIPE].isin(equipes_selecionadas)]
 
     status_disponiveis = sorted(df_f3[COL_STATUS].dropna().unique().tolist())
-    todos_status = st.sidebar.checkbox("Selecionar todos os Status", value=False)
+    todos_status = st.sidebar.checkbox("Selecionar todos os Status", value=True)
     if todos_status:
         status_selecionados = status_disponiveis
     else:
