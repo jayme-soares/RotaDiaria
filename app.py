@@ -298,7 +298,7 @@ try:
     COL_DATA = 'Data Início'
     COL_HORA_INI = 'Data Início'
     COL_HORA_FIM = 'Data Fim'
-    COL_STATUS = 'Estado TdC'
+    COL_STATUS = 'Resultado'
     COL_RETORNO = 'Resultado'
     COL_SETOR = 'Tipo TdC'
     COL_TRAMITE = 'Tramite'
