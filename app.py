@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import folium
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 import matplotlib.colors as mcolors
 import sqlite3
 import os
@@ -636,7 +636,7 @@ try:
         if exibir_designados:
             st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
 
-        st_folium(mapa, width=1200, height=650)
+        components.html(mapa.get_root().render(), height=650, scrolling=False)
 
         with st.expander("Ver Tabela de Dados Filtrados"):
             st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
