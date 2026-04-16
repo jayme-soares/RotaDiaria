@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 import streamlit.components.v1 as components
+from branca.element import Element
 import matplotlib.colors as mcolors
 import sqlite3
 import os
@@ -129,11 +130,25 @@ def _selecionar_coluna_fuzzy(df, inclui=None, exclui=None):
 
 
 def _parse_data_flexivel(serie):
-    data_dmy = pd.to_datetime(serie, dayfirst=True, errors="coerce")
+    s = serie.astype(str).str.strip()
+    data_dmy = pd.to_datetime(s, dayfirst=True, errors="coerce")
+
     faltantes = data_dmy.isna()
     if faltantes.any():
-        data_ymd = pd.to_datetime(serie[faltantes], dayfirst=False, errors="coerce")
+        data_ymd = pd.to_datetime(s[faltantes], dayfirst=False, errors="coerce")
         data_dmy.loc[faltantes] = data_ymd
+
+    faltantes = data_dmy.isna()
+    if faltantes.any():
+        data_generica = pd.to_datetime(s[faltantes], errors="coerce")
+        data_dmy.loc[faltantes] = data_generica
+
+    faltantes = data_dmy.isna()
+    if faltantes.any():
+        extrair_data = s[faltantes].str.extract(r"(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})", expand=False)
+        data_extraida = pd.to_datetime(extrair_data, dayfirst=True, errors="coerce")
+        data_dmy.loc[faltantes] = data_extraida
+
     return data_dmy
 
 
@@ -388,6 +403,15 @@ try:
     st.sidebar.subheader("🗂️ Designados")
     exibir_designados = st.sidebar.checkbox("Exibir camada de designados", value=True)
 
+    # Referência de execução para identificar "sobra":
+    # mesma data e mesmas equipes selecionadas (independente de setor/status).
+    df_execucao_referencia = df_f1[df_f1[COL_EQUIPE].isin(equipes_selecionadas)]
+    codigos_executados = {
+        _normalizar_chave_codigo(cod)
+        for cod in df_execucao_referencia[COL_ID].tolist()
+        if _normalizar_chave_codigo(cod)
+    }
+
     # Designados seguem os filtros existentes: data selecionada + equipes selecionadas.
     # Não aplicamos filtro por setor/tipo para preservar todos os designados da equipe no dia.
     equipes_norm = {_normalizar_texto_filtro(e) for e in equipes_selecionadas if str(e).strip()}
@@ -405,16 +429,17 @@ try:
     else:
         df_designados_filtrado = df_designados_tmp.iloc[0:0].drop(columns=["_equipe_norm"])
 
-    estados_excluidos = {"esitato", "inesecuzione"}
-    df_designados_filtrado["_estado_norm"] = df_designados_filtrado[COL_D_ESTADO].apply(_normalizar_nome_coluna)
-    df_designados_filtrado = df_designados_filtrado[
-        ~df_designados_filtrado["_estado_norm"].isin(estados_excluidos)
-    ].drop(columns=["_estado_norm"])
-    total_designados_filtrados = len(df_designados_filtrado)
+    if codigos_executados and not df_designados_filtrado.empty:
+        df_designados_filtrado["_codigo_norm"] = df_designados_filtrado[COL_D_ID].apply(_normalizar_chave_codigo)
+        df_designados_filtrado = df_designados_filtrado[
+            ~df_designados_filtrado["_codigo_norm"].isin(codigos_executados)
+        ].drop(columns=["_codigo_norm"])
+
     designados_com_coord = 0
     if exibir_designados and not df_designados_filtrado.empty:
         designados_com_coord = int(df_designados_filtrado[[COL_D_LAT, COL_D_LON]].notna().all(axis=1).sum())
         df_designados_filtrado = df_designados_filtrado.dropna(subset=[COL_D_LAT, COL_D_LON])
+    total_designados_filtrados = len(df_designados_filtrado)
 
     if df_filtrado.empty and (not exibir_designados or df_designados_filtrado.empty):
         st.warning("Nenhum dado encontrado com os filtros selecionados.")
@@ -636,7 +661,67 @@ try:
         if exibir_designados:
             st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
 
-        components.html(mapa.get_root().render(), height=650, scrolling=False)
+        def _resumo_lista(lista, limite=3):
+            itens = [str(x).strip() for x in lista if str(x).strip()]
+            if not itens:
+                return "Nenhum"
+            if len(itens) <= limite:
+                return ", ".join(itens)
+            return f"{', '.join(itens[:limite])} (+{len(itens) - limite})"
+
+        equipes_txt = html_lib.escape(_resumo_lista(equipes_selecionadas), quote=True)
+        setores_txt = html_lib.escape(_resumo_lista(setores_selecionados), quote=True)
+        status_txt = html_lib.escape(_resumo_lista(status_selecionados), quote=True)
+        mes_txt = html_lib.escape(str(mes_selecionado_label), quote=True)
+        data_txt = html_lib.escape(str(data_selecionada), quote=True)
+        qtd_exec_txt = html_lib.escape(str(len(df_filtrado)), quote=True)
+        qtd_des_txt = html_lib.escape(str(total_designados_filtrados), quote=True)
+
+        resumo_filtros_html = f"""
+        <div style="
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            background: rgba(255,255,255,0.95);
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 8px;
+            width: 320px;
+            font-size: 11px;
+            font-family: Arial, sans-serif;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+        ">
+            <div style="font-weight: bold; margin-bottom: 6px;">Resumo dos filtros</div>
+            <table style="width:100%; border-collapse: collapse;">
+                <tr><td style="font-weight:bold; padding:2px 4px;">Mês/Ano</td><td style="padding:2px 4px;">{mes_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Data</td><td style="padding:2px 4px;">{data_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Equipes</td><td style="padding:2px 4px;">{equipes_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Setores</td><td style="padding:2px 4px;">{setores_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Status</td><td style="padding:2px 4px;">{status_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. executados</td><td style="padding:2px 4px;">{qtd_exec_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. designados (sobra)</td><td style="padding:2px 4px;">{qtd_des_txt}</td></tr>
+            </table>
+        </div>
+        """
+        mapa.get_root().html.add_child(Element(resumo_filtros_html))
+
+        mapa_html = mapa.get_root().render()
+        components.html(mapa_html, height=650, scrolling=False)
+
+        data_export = str(data_selecionada).replace("/", "-")
+        mes_export = str(mes_selecionado).replace("/", "-")
+        equipes_nome_export = _resumo_lista(equipes_selecionadas, limite=2)
+        equipes_slug = _normalizar_nome_coluna(equipes_nome_export.replace(", ", "-").replace(" (+", "-mais").replace(")", ""))
+        if not equipes_slug:
+            equipes_slug = "sem-equipe"
+        st.download_button(
+            "📥 Exportar mapa filtrado (HTML)",
+            data=mapa_html.encode("utf-8"),
+            file_name=f"mapa_filtrado_{mes_export}_{data_export}_{equipes_slug}.html",
+            mime="text/html",
+            use_container_width=False,
+        )
 
         with st.expander("Ver Tabela de Dados Filtrados"):
             st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
