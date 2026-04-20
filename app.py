@@ -325,18 +325,18 @@ def carregar_dados():
 try:
     df, df_designados, df_coordenadas = carregar_dados()
 
-    COL_ID = 'Código TdC'
-    COL_EQUIPE = 'Equipe'
-    COL_LAT = 'Latitude'
-    COL_LON = 'Longitude'
-    COL_DATA = 'Data Início'
-    COL_HORA_INI = 'Data Início'
-    COL_HORA_FIM = 'Data Fim'
-    COL_STATUS = 'Resultado'
-    COL_RETORNO = 'Resultado'
-    COL_SETOR = 'Tipo TdC'
-    COL_TRAMITE = 'Tramite'
-    COL_CAUSA = 'Causa/Descritivo Resultado'
+    COL_ID = _selecionar_coluna(df, ["Código TdC", "codigo tdc", "codigo_tdc"]) or "Código TdC"
+    COL_EQUIPE = _selecionar_coluna(df, ["Equipe", "Equipe_x"]) or "Equipe"
+    COL_LAT = _selecionar_coluna(df, ["Latitude", "lat"]) or "Latitude"
+    COL_LON = _selecionar_coluna(df, ["Longitude", "lon", "long"]) or "Longitude"
+    COL_DATA = _selecionar_coluna(df, ["Data Início", "Data Inicio", "Data"]) or "Data Início"
+    COL_HORA_INI = COL_DATA
+    COL_HORA_FIM = _selecionar_coluna(df, ["Data Fim", "Data Final"]) or COL_DATA
+    COL_STATUS = _selecionar_coluna(df, ["Estado TdC", "Estado", "Resultado"]) or "Resultado"
+    COL_RETORNO = _selecionar_coluna(df, ["Resultado", "Retorno"]) or COL_STATUS
+    COL_SETOR = _selecionar_coluna(df, ["Tipo TdC", "Tipo Serviço", "Setor"]) or "Tipo TdC"
+    COL_TRAMITE = _selecionar_coluna(df, ["Tramite", "Trâmite"]) or "Tramite"
+    COL_CAUSA = _selecionar_coluna(df, ["Causa/Descritivo Resultado", "Causa", "Descritivo"]) or "Causa/Descritivo Resultado"
     COL_D_ID = 'Código TdC'
     COL_D_CLIENTE = 'Código Cliente'
     COL_D_EQUIPE = 'Equipe Designada'
@@ -346,6 +346,12 @@ try:
     COL_D_ENDERECO = 'Endereço'
     COL_D_LAT = 'Latitude'
     COL_D_LON = 'Longitude'
+
+    cols_criticas = [COL_ID, COL_EQUIPE, COL_LAT, COL_LON, COL_DATA, COL_SETOR, COL_STATUS, COL_RETORNO]
+    faltantes = [c for c in cols_criticas if c not in df.columns]
+    if faltantes:
+        st.error(f"A base de execução está sem colunas obrigatórias: {', '.join(faltantes)}")
+        st.stop()
 
     # Dados
     df[COL_LAT] = pd.to_numeric(df[COL_LAT], errors="coerce")
@@ -384,6 +390,9 @@ try:
     meses_disponiveis = sorted(
         set(df["Mes"].dropna().tolist() + df_designados["Mes"].dropna().tolist()) - {"NaT"}
     )
+    if not meses_disponiveis:
+        st.warning("Não foi possível montar o filtro de mês. Verifique o formato das colunas de data.")
+        st.stop()
     meses_labels = [f"{m.split('-')[1]}/{m.split('-')[0]}" for m in meses_disponiveis]
     mes_map = dict(zip(meses_labels, meses_disponiveis))
     mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels)
@@ -396,6 +405,9 @@ try:
         set(df_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist() + df_designados_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist()),
         key=lambda x: pd.to_datetime(x, dayfirst=True, errors="coerce")
     )
+    if not datas_ordenadas:
+        st.warning("Não foi possível montar o filtro de data para o mês selecionado.")
+        st.stop()
     data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas)
 
     df_f1 = df_mes[df_mes["Data_BR"] == data_selecionada]
@@ -499,15 +511,15 @@ try:
                     for alvo in equipes_norm
                 )
             )
-        ].drop(columns=["_equipe_norm"])
+        ].drop(columns=["_equipe_norm"], errors="ignore")
     else:
-        df_designados_filtrado = df_designados_tmp.iloc[0:0].drop(columns=["_equipe_norm"])
+        df_designados_filtrado = df_designados_tmp.iloc[0:0].drop(columns=["_equipe_norm"], errors="ignore")
 
     if codigos_executados and not df_designados_filtrado.empty:
         df_designados_filtrado["_codigo_norm"] = df_designados_filtrado[COL_D_ID].apply(_normalizar_chave_codigo)
         df_designados_filtrado = df_designados_filtrado[
             ~df_designados_filtrado["_codigo_norm"].isin(codigos_executados)
-        ].drop(columns=["_codigo_norm"])
+        ].drop(columns=["_codigo_norm"], errors="ignore")
 
     designados_com_coord = 0
     if exibir_designados and not df_designados_filtrado.empty:
@@ -862,14 +874,23 @@ try:
         )
 
         with st.expander("Ver Tabela de Dados Filtrados"):
-            st.dataframe(df_filtrado[[COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO]], use_container_width=True)
+            colunas_exec = [c for c in [COL_ID, COL_EQUIPE, "Data_BR", COL_HORA_INI, COL_SETOR, COL_RETORNO] if c in df_filtrado.columns]
+            if colunas_exec:
+                st.dataframe(df_filtrado[colunas_exec], use_container_width=True)
+            else:
+                st.info("Sem colunas disponíveis para exibir a tabela de serviços executados.")
 
         if exibir_designados:
             with st.expander("Ver Tabela de Serviços Designados"):
-                st.dataframe(
-                    df_designados_filtrado[[COL_D_ID, COL_D_EQUIPE, "Data_BR", COL_D_TIPO, COL_D_ENDERECO]],
-                    use_container_width=True
-                )
+                colunas_designados = [c for c in [COL_D_ID, COL_D_EQUIPE, "Data_BR", COL_D_TIPO, COL_D_ENDERECO] if c in df_designados_filtrado.columns]
+                if colunas_designados:
+                    st.dataframe(df_designados_filtrado[colunas_designados], use_container_width=True)
+                else:
+                    st.info("Sem colunas disponíveis para exibir a tabela de designados.")
 
 except Exception as e:
-    st.error("Erro interno ao processar os dados.")
+    if e.__class__.__name__ == "StopException":
+        raise
+    st.error(f"Erro interno ao processar os dados: {e}")
+    with st.expander("Detalhes técnicos do erro"):
+        st.exception(e)
