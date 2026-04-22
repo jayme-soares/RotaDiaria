@@ -156,18 +156,20 @@ def _carregar_rastro_csv(uploaded_file):
     try:
         df_raw = pd.read_csv(uploaded_file, sep=";", dtype=str, encoding="utf-8-sig")
     except Exception:
-        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude"])
+        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude", "Veiculo"])
 
     col_lat = _selecionar_coluna(df_raw, ["Latitude"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
     col_lon = _selecionar_coluna(df_raw, ["Longitude"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"])
     col_data = _selecionar_coluna(df_raw, ["Data_Captura", "Data Captura", "Data"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
+    col_veiculo = _selecionar_coluna(df_raw, ["Veiculo", "Veículo", "Placa"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["veiculo"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["placa"])
 
     if not col_lat or not col_lon or not col_data:
-        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude"])
+        return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude", "Veiculo"])
 
     df = pd.DataFrame()
     df["Latitude"] = pd.to_numeric(df_raw[col_lat].astype(str).str.replace(",", ".", regex=False), errors="coerce")
     df["Longitude"] = pd.to_numeric(df_raw[col_lon].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    df["Veiculo"] = df_raw[col_veiculo].astype(str).str.strip() if col_veiculo else ""
     data_texto = df_raw[col_data].astype(str).str.replace(" - ", " ", regex=False).str.strip()
     df["DataHora"] = pd.to_datetime(data_texto, dayfirst=True, errors="coerce")
     df["Data_BR"] = df["DataHora"].dt.strftime("%d/%m/%Y")
@@ -746,31 +748,37 @@ try:
                 nome_equipe = rastro["equipe"]
                 nome_arquivo = rastro["arquivo"]
                 cor_rastro = cores_equipe[(index + 2) % len(cores_equipe)]
+                placa_rastro = str(dados_rastro["Veiculo"].dropna().iloc[0]).strip() if "Veiculo" in dados_rastro.columns and not dados_rastro["Veiculo"].dropna().empty else nome_equipe
 
-                dados_rastro_plot = _reduzir_pontos_trajeto_df(dados_rastro, limite=1500)
+                dados_rastro_plot = _reduzir_pontos_trajeto_df(dados_rastro, limite=900)
                 coordenadas_rastro = dados_rastro_plot[["Latitude", "Longitude"]].values.tolist()
                 if len(coordenadas_rastro) >= 2:
-                    folium.PolyLine(
-                        coordenadas_rastro,
-                        color=cor_rastro,
-                        weight=3,
-                        opacity=0.9,
-                        dash_array="8,6",
-                        tooltip=f"Rastro real: {nome_equipe} ({nome_arquivo})"
-                    ).add_to(camada_rastro)
+                    for i in range(len(dados_rastro_plot) - 1):
+                        ponto_a = dados_rastro_plot.iloc[i]
+                        ponto_b = dados_rastro_plot.iloc[i + 1]
+                        hora_a = ponto_a["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
+                        hora_b = ponto_b["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
+                        folium.PolyLine(
+                            [[ponto_a["Latitude"], ponto_a["Longitude"]], [ponto_b["Latitude"], ponto_b["Longitude"]]],
+                            color=cor_rastro,
+                            weight=3,
+                            opacity=0.9,
+                            dash_array="8,6",
+                            tooltip=f"{placa_rastro} | {hora_a} → {hora_b}",
+                        ).add_to(camada_rastro)
 
                 for _, ponto in dados_rastro_plot.iterrows():
                     datahora_txt = ponto["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
                     folium.CircleMarker(
                         location=[ponto["Latitude"], ponto["Longitude"]],
-                        radius=2,
-                        color=cor_rastro,
+                        radius=4,
+                        color="#b04a00",
                         fill=True,
-                        fill_color=cor_rastro,
-                        fill_opacity=0.8,
-                        weight=1,
-                        tooltip=f"{nome_equipe} - {datahora_txt}",
-                        popup=f"{nome_equipe}<br>{datahora_txt}"
+                        fill_color="#ff8c00",
+                        fill_opacity=1,
+                        weight=2,
+                        tooltip=f"{placa_rastro} | {datahora_txt}",
+                        popup=f"{placa_rastro}<br>{datahora_txt}"
                     ).add_to(camada_rastro)
 
                 if not dados_rastro_plot.empty:
@@ -780,14 +788,14 @@ try:
                     fim_txt = fim["DataHora"].strftime("%d/%m/%Y %H:%M:%S")
                     folium.Marker(
                         location=[inicio["Latitude"], inicio["Longitude"]],
-                        tooltip=f"🚙 Início rastro - {nome_equipe} | {inicio_txt}",
-                        popup=f"Início rastro<br>{nome_equipe}<br>{inicio_txt}",
+                        tooltip=f"🚙 Início rastro | {placa_rastro} | {inicio_txt}",
+                        popup=f"Início rastro<br>{placa_rastro}<br>{inicio_txt}",
                         icon=folium.Icon(color="blue", icon="play")
                     ).add_to(camada_rastro)
                     folium.Marker(
                         location=[fim["Latitude"], fim["Longitude"]],
-                        tooltip=f"🛑 Fim rastro - {nome_equipe} | {fim_txt}",
-                        popup=f"Fim rastro<br>{nome_equipe}<br>{fim_txt}",
+                        tooltip=f"🛑 Fim rastro | {placa_rastro} | {fim_txt}",
+                        popup=f"Fim rastro<br>{placa_rastro}<br>{fim_txt}",
                         icon=folium.Icon(color="blue", icon="stop")
                     ).add_to(camada_rastro)
 
@@ -799,9 +807,11 @@ try:
         folium.LayerControl(collapsed=False).add_to(mapa)
 
         st.markdown("""
-        **Legenda do Mapa:** 🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
-        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔵 Linha tracejada: Rastro real do veículo | 🔹 Ponto azul: captura com horário
+        **Legenda do Mapa:** \n
+        🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
+        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
         """)
+        # Apenas para debug (descomentar para visualizar)
         if exibir_designados:
             st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
         if tem_rastro_visivel:
@@ -821,6 +831,9 @@ try:
         mes_txt = html_lib.escape(str(mes_selecionado_label), quote=True)
         data_txt = html_lib.escape(str(data_selecionada), quote=True)
         qtd_exec_txt = html_lib.escape(str(len(df_filtrado)), quote=True)
+        qtd_visitas_total = len(df_f3)
+        qtd_total_servicos = total_designados_filtrados + qtd_visitas_total
+        qtd_total_servicos_txt = html_lib.escape(str(qtd_total_servicos), quote=True)
         qtd_des_txt = html_lib.escape(str(total_designados_filtrados), quote=True)
         qtd_rastro_arquivos_txt = html_lib.escape(str(total_rastro_arquivos), quote=True)
         qtd_rastro_pontos_txt = html_lib.escape(str(total_rastro_pontos), quote=True)
@@ -840,7 +853,15 @@ try:
             font-family: Arial, sans-serif;
             box-shadow: 0 1px 6px rgba(0,0,0,0.2);
         ">
-            <div style="font-weight: bold; margin-bottom: 6px;">Resumo dos filtros</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                <div style="font-weight: bold;">Resumo dos filtros</div>
+                <button id="resumo-filtros-btn"
+                        onclick="var c=document.getElementById('resumo-filtros-conteudo');var b=document.getElementById('resumo-filtros-btn');c.style.display=(c.style.display==='none')?'block':'none';b.innerText=(c.style.display==='none')?'Mostrar':'Recolher';"
+                        style="font-size:10px; padding:2px 6px; border:1px solid #bbb; border-radius:4px; background:#fff; cursor:pointer;">
+                    Recolher
+                </button>
+            </div>
+            <div id="resumo-filtros-conteudo">
             <table style="width:100%; border-collapse: collapse;">
                 <tr><td style="font-weight:bold; padding:2px 4px;">Mês/Ano</td><td style="padding:2px 4px;">{mes_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Data</td><td style="padding:2px 4px;">{data_txt}</td></tr>
@@ -848,10 +869,12 @@ try:
                 <tr><td style="font-weight:bold; padding:2px 4px;">Setores</td><td style="padding:2px 4px;">{setores_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Status</td><td style="padding:2px 4px;">{status_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Serv. executados</td><td style="padding:2px 4px;">{qtd_exec_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. totais (Designados + Com visita)</td><td style="padding:2px 4px;">{qtd_total_servicos_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Serv. designados (sobra)</td><td style="padding:2px 4px;">{qtd_des_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Rastros carregados</td><td style="padding:2px 4px;">{qtd_rastro_arquivos_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Pontos de rastro</td><td style="padding:2px 4px;">{qtd_rastro_pontos_txt}</td></tr>
             </table>
+            </div>
         </div>
         """
         mapa.get_root().html.add_child(Element(resumo_filtros_html))
