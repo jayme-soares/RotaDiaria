@@ -809,7 +809,7 @@ try:
         st.markdown("""
         **Legenda do Mapa:** \n
         🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
-        🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
+        🟩 Pino Verde: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
         """)
         # Apenas para debug (descomentar para visualizar)
         # if exibir_designados:
