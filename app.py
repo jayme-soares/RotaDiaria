@@ -812,10 +812,10 @@ try:
         🟩 Pino: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
         """)
         # Apenas para debug (descomentar para visualizar)
-        if exibir_designados:
-            st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
-        if tem_rastro_visivel:
-            st.caption(f"Rastros carregados: {total_rastro_arquivos} arquivo(s) | Pontos: {total_rastro_pontos}")
+        # if exibir_designados:
+        #     st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
+        # if tem_rastro_visivel:
+        #     st.caption(f"Rastros carregados: {total_rastro_arquivos} arquivo(s) | Pontos: {total_rastro_pontos}")
 
         def _resumo_lista(lista, limite=3):
             itens = [str(x).strip() for x in lista if str(x).strip()]
@@ -842,9 +842,9 @@ try:
         <div style="
             position: fixed;
             top: 10px;
-            right: 10px;
+            left: 50px;
             z-index: 9999;
-            background: rgba(255,255,255,0.95);
+            background: rgba(255,255,255,0.65);
             border: 1px solid #ddd;
             border-radius: 8px;
             padding: 8px;
@@ -868,11 +868,10 @@ try:
                 <tr><td style="font-weight:bold; padding:2px 4px;">Equipes</td><td style="padding:2px 4px;">{equipes_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Setores</td><td style="padding:2px 4px;">{setores_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Status</td><td style="padding:2px 4px;">{status_txt}</td></tr>
-                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. executados</td><td style="padding:2px 4px;">{qtd_exec_txt}</td></tr>
-                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. totais (Designados + Com visita)</td><td style="padding:2px 4px;">{qtd_total_servicos_txt}</td></tr>
-                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. designados (sobra)</td><td style="padding:2px 4px;">{qtd_des_txt}</td></tr>
-                <tr><td style="font-weight:bold; padding:2px 4px;">Rastros carregados</td><td style="padding:2px 4px;">{qtd_rastro_arquivos_txt}</td></tr>
-                <tr><td style="font-weight:bold; padding:2px 4px;">Pontos de rastro</td><td style="padding:2px 4px;">{qtd_rastro_pontos_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. Finalizados</td><td style="padding:2px 4px;">{qtd_exec_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. Sem Visita (Sobra)</td><td style="padding:2px 4px;">{qtd_des_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Serv. totais designados</td><td style="padding:2px 4px;">{qtd_total_servicos_txt}</td></tr>
+                <tr><td style="font-weight:bold; padding:2px 4px;">Pontos de rastro veicular</td><td style="padding:2px 4px;">{qtd_rastro_pontos_txt}</td></tr>
             </table>
             </div>
         </div>
