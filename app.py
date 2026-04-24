@@ -455,7 +455,7 @@ try:
     total_rastro_arquivos = 0
     if equipes_selecionadas:
         arquivos_rastro = st.sidebar.file_uploader(
-            "Importar rastros (.csv) - um ou mais arquivos",
+            "Importar arquivos(.csv) de rastreamento veicular do GPM",
             type=["csv"],
             accept_multiple_files=True,
             key="upload_rastro_csv",
