@@ -804,7 +804,7 @@ try:
             camada_designados.add_to(mapa)
         if tem_rastro_visivel:
             camada_rastro.add_to(mapa)
-        folium.LayerControl(collapsed=False).add_to(mapa)
+        folium.LayerControl(collapsed=True).add_to(mapa)
 
         st.markdown("""
         **Legenda do Mapa:** \n
@@ -856,7 +856,7 @@ try:
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
                 <div style="font-weight: bold;">Resumo dos filtros</div>
                 <button id="resumo-filtros-btn"
-                        onclick="var c=document.getElementById('resumo-filtros-conteudo');var b=document.getElementById('resumo-filtros-btn');c.style.display=(c.style.display==='none')?'block':'none';b.innerText=(c.style.display==='none')?'Mostrar':'Recolher';"
+                        onclick="var c=document.getElementById('resumo-filtros-conteudo');var b=document.getElementById('resumo-filtros-btn');c.style.display=(c.style.display==='none')?'block':'none';b.innerText=(c.style.display==='none')?'Mostrar':'Ocultar';"
                         style="font-size:10px; padding:2px 6px; border:1px solid #bbb; border-radius:4px; background:#fff; cursor:pointer;">
                     Recolher
                 </button>
