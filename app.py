@@ -153,9 +153,16 @@ def _parse_data_flexivel(serie):
 
 
 def _carregar_rastro_csv(uploaded_file):
-    try:
-        df_raw = pd.read_csv(uploaded_file, sep=";", dtype=str, encoding="utf-8-sig")
-    except Exception:
+    df_raw = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            uploaded_file.seek(0)
+            df_raw = pd.read_csv(uploaded_file, sep=";", dtype=str, encoding=encoding)
+            break
+        except Exception:
+            continue
+
+    if df_raw is None:
         return pd.DataFrame(columns=["DataHora", "Data_BR", "Latitude", "Longitude", "Veiculo"])
 
     col_lat = _selecionar_coluna(df_raw, ["Latitude"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
@@ -812,10 +819,10 @@ try:
         🟩 Pino Verde: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
         """)
         # Apenas para debug (descomentar para visualizar)
-        # if exibir_designados:
-        #     st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
-        # if tem_rastro_visivel:
-        #     st.caption(f"Rastros carregados: {total_rastro_arquivos} arquivo(s) | Pontos: {total_rastro_pontos}")
+        if exibir_designados:
+            st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
+        if tem_rastro_visivel:
+            st.caption(f"Rastros carregados: {total_rastro_arquivos} arquivo(s) | Pontos: {total_rastro_pontos}")
 
         def _resumo_lista(lista, limite=3):
             itens = [str(x).strip() for x in lista if str(x).strip()]
