@@ -12,8 +12,6 @@ import html as html_lib
 st.set_page_config(page_title="Visualizador de Rotas de Campo", layout="wide")
 
 # --- Autenticação ---
-
-
 def tela_login():
     st.title("🔒 Acesso Restrito")
     st.info("Solicite a senha ao responsável técnico.")
@@ -25,11 +23,9 @@ def tela_login():
             st.rerun()
         st.error("Senha incorreta. Tente novamente.")
 
-
 if "authenticated" not in st.session_state:
     tela_login()
     st.stop()
-
 
 # --- Aplicação Principal ---
 if not st.session_state.get("authenticated"):
@@ -59,6 +55,11 @@ def _carregar_local():
                  'Causa/Descritivo Resultado', 'Ciclo de trabalho']
     df = df_full.iloc[:, col_indices].copy()
     df.columns = col_names
+    col_endereco = _selecionar_coluna(
+        df_full,
+        ["Endereço", "Endereco", "Logradouro", "Endereço da atividade", "Endereco da atividade", "Endereço do cliente", "Endereco do cliente"]
+    ) or _selecionar_coluna_fuzzy(df_full, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_full, inclui=["logradouro"])
+    df["Endereço"] = df_full[col_endereco] if col_endereco else ""
     return df
 
 
@@ -86,13 +87,11 @@ def _carregar_gsheet():
 
     worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
     dados_values = worksheets["dados"].get_all_values() if "dados" in worksheets else []
-    designados_values = worksheets["designados"].get_all_values() if "designados" in worksheets else []
     coordenadas_values = worksheets["coordenadas"].get_all_values() if "coordenadas" in worksheets else []
 
     df_dados = _valores_para_df(dados_values)
-    df_designados = _padronizar_designados(_valores_para_df(designados_values))
     df_coordenadas = _padronizar_coordenadas(_valores_para_df(coordenadas_values))
-    return df_dados, df_designados, df_coordenadas
+    return df_dados, df_coordenadas
 
 
 def _aplicar_tramites(df):
@@ -101,7 +100,6 @@ def _aplicar_tramites(df):
         df_tramites = pd.read_excel(TRAMITES_PATH)
         df = df.merge(df_tramites, how='left')
     return df
-
 
 def _normalizar_nome_coluna(nome):
     texto = str(nome).strip().lower()
@@ -118,7 +116,6 @@ def _selecionar_coluna(df, aliases):
             return col
     return None
 
-
 def _selecionar_coluna_fuzzy(df, inclui=None, exclui=None):
     inclui = inclui or []
     exclui = exclui or []
@@ -127,7 +124,6 @@ def _selecionar_coluna_fuzzy(df, inclui=None, exclui=None):
         if all(token in norm for token in inclui) and all(token not in norm for token in exclui):
             return col
     return None
-
 
 def _parse_data_flexivel(serie):
     s = serie.astype(str).str.strip()
@@ -150,7 +146,6 @@ def _parse_data_flexivel(serie):
         data_dmy.loc[faltantes] = data_extraida
 
     return data_dmy
-
 
 def _carregar_rastro_csv(uploaded_file):
     df_raw = None
@@ -184,7 +179,6 @@ def _carregar_rastro_csv(uploaded_file):
     df = df.dropna(subset=["Latitude", "Longitude", "DataHora"]).sort_values("DataHora")
     return df
 
-
 def _reduzir_pontos_trajeto_df(df_trajeto, limite=1500):
     if df_trajeto.empty or len(df_trajeto) <= limite:
         return df_trajeto
@@ -194,7 +188,6 @@ def _reduzir_pontos_trajeto_df(df_trajeto, limite=1500):
         df_reduzido = pd.concat([df_reduzido, df_trajeto.iloc[[-1]]])
     return df_reduzido
 
-
 def _normalizar_texto_filtro(valor):
     if pd.isna(valor):
         return ""
@@ -202,7 +195,6 @@ def _normalizar_texto_filtro(valor):
     mapa = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
     texto = texto.translate(mapa)
     return "".join(ch for ch in texto if ch.isalnum())
-
 
 def _normalizar_chave_codigo(valor):
     if pd.isna(valor):
@@ -212,58 +204,63 @@ def _normalizar_chave_codigo(valor):
         texto = texto[:-2]
     return _normalizar_nome_coluna(texto)
 
-
 def _colunas_padrao_designados():
     return ['Código TdC', 'Código Cliente', 'Equipe Designada', 'Tipo Serviço', 'Estado', 'Data', 'Endereço', 'Latitude', 'Longitude']
 
 
-def _padronizar_designados(df_raw):
-    if df_raw.empty:
+def _gerar_designados_fim_jornada(df_execucao):
+    if df_execucao.empty:
         return pd.DataFrame(columns=_colunas_padrao_designados())
 
-    col_id = _selecionar_coluna(df_raw, ["Código TdC", "codigo_tdc", "codigo tdc"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "tdc"])
-    col_equipe = _selecionar_coluna(df_raw, ["Equipe", "Recurso", "Equipe Designada", "recurso/equipe", "recursoequipe"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["equipe"])
-    col_tipo = _selecionar_coluna(df_raw, ["Tipo TdC", "Setor", "Tipo Serviço", "tipo_servico", "tipo de servico"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["tipo"])
-    col_estado = _selecionar_coluna(df_raw, ["Estado", "Stato"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["estado"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["stato"])
-    col_data = _selecionar_coluna(
-        df_raw,
-        [
-            "Data início Escalonamento", "Data Inicio Escalonamento", "data_inicio_escalonamento",
-            "Data", "Data Início", "Data início execução", "data_inicio_execucao", "data início"
-        ]
-    ) or _selecionar_coluna_fuzzy(df_raw, inclui=["datainicioescalonamento"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["data"])
-    col_cliente = _selecionar_coluna(df_raw, ["Código Cliente", "Codigo Cliente", "cod_cliente", "cliente_codigo", "Cliente ID"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["codigo", "cliente"])
-    col_endereco = _selecionar_coluna(df_raw, ["Endereço", "Endereco", "Logradouro", "endereco completo"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["logradouro"])
-    col_lat = _selecionar_coluna(df_raw, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
-    col_lon = _selecionar_coluna(df_raw, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["long"])
+    col_causa = _selecionar_coluna(
+        df_execucao,
+        ["Causa/Descritivo Resultado", "Causa", "Descritivo"]
+    ) or _selecionar_coluna_fuzzy(df_execucao, inclui=["causa"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["descritivo"])
+
+    if not col_causa:
+        return pd.DataFrame(columns=_colunas_padrao_designados())
+
+    causa_alvo = "fjl - fim da jornada laborativa"
+    serie_causa = df_execucao[col_causa].astype(str).str.strip().str.casefold()
+    base = df_execucao[serie_causa == causa_alvo].copy()
+    if base.empty:
+        return pd.DataFrame(columns=_colunas_padrao_designados())
+
+    col_id = _selecionar_coluna(base, ["Código TdC", "codigo_tdc", "codigo tdc"]) or _selecionar_coluna_fuzzy(base, inclui=["codigo", "tdc"])
+    col_cliente = _selecionar_coluna(base, ["Código Cliente", "Codigo Cliente", "Cliente ID", "Instalação", "Instalacao"]) or _selecionar_coluna_fuzzy(base, inclui=["codigo", "cliente"])
+    col_equipe = _selecionar_coluna(base, ["Equipe", "Equipe Designada", "Recurso"]) or _selecionar_coluna_fuzzy(base, inclui=["equipe"])
+    col_tipo = _selecionar_coluna(base, ["Ciclo de trabalho", "Ciclo Trabalho", "Tipo TdC", "Tipo Serviço", "Setor"]) or _selecionar_coluna_fuzzy(base, inclui=["ciclo"]) or _selecionar_coluna_fuzzy(base, inclui=["tipo"])
+    col_estado = _selecionar_coluna(base, ["Estado TdC", "Estado", "Resultado"]) or _selecionar_coluna_fuzzy(base, inclui=["estado"])
+    col_data = _selecionar_coluna(base, ["Data Início", "Data Inicio", "Data"]) or _selecionar_coluna_fuzzy(base, inclui=["data"])
+    col_endereco = _selecionar_coluna(base, ["Endereço", "Endereco", "Logradouro"]) or _selecionar_coluna_fuzzy(base, inclui=["endere"]) or _selecionar_coluna_fuzzy(base, inclui=["logradouro"])
+    col_lat = _selecionar_coluna(base, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(base, inclui=["lat"])
+    col_lon = _selecionar_coluna(base, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(base, inclui=["lon"]) or _selecionar_coluna_fuzzy(base, inclui=["long"])
 
     df = pd.DataFrame()
-    df['Código TdC'] = df_raw[col_id] if col_id else ""
-    df['Código Cliente'] = df_raw[col_cliente] if col_cliente else ""
-    df['Equipe Designada'] = df_raw[col_equipe] if col_equipe else ""
-    df['Tipo Serviço'] = df_raw[col_tipo] if col_tipo else ""
-    df['Estado'] = df_raw[col_estado] if col_estado else ""
-    df['Data'] = df_raw[col_data] if col_data else ""
-    df['Endereço'] = df_raw[col_endereco] if col_endereco else ""
-    df['Latitude'] = pd.to_numeric(df_raw[col_lat], errors="coerce") if col_lat else pd.NA
-    df['Longitude'] = pd.to_numeric(df_raw[col_lon], errors="coerce") if col_lon else pd.NA
+    df["Código TdC"] = base[col_id] if col_id else ""
+    df["Código Cliente"] = base[col_cliente] if col_cliente else ""
+    df["Equipe Designada"] = base[col_equipe] if col_equipe else ""
+    df["Tipo Serviço"] = base[col_tipo] if col_tipo else ""
+    df["Estado"] = base[col_estado] if col_estado else ""
+    df["Data"] = base[col_data] if col_data else ""
+    df["Endereço"] = base[col_endereco] if col_endereco else ""
+    df["Latitude"] = pd.to_numeric(base[col_lat], errors="coerce") if col_lat else pd.NA
+    df["Longitude"] = pd.to_numeric(base[col_lon], errors="coerce") if col_lon else pd.NA
     return df
 
-
-def _carregar_designados_local():
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        df_raw = pd.read_sql_query("SELECT * FROM base_designados", conn)
-    except pd.errors.DatabaseError:
-        return pd.DataFrame(columns=_colunas_padrao_designados())
-    finally:
-        conn.close()
-    return _padronizar_designados(df_raw)
-
+def _mascara_fim_jornada(df_execucao):
+    if df_execucao.empty:
+        return pd.Series(False, index=df_execucao.index)
+    col_causa = _selecionar_coluna(
+        df_execucao,
+        ["Causa/Descritivo Resultado", "Causa", "Descritivo"]
+    ) or _selecionar_coluna_fuzzy(df_execucao, inclui=["causa"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["descritivo"])
+    if not col_causa:
+        return pd.Series(False, index=df_execucao.index)
+    return df_execucao[col_causa].astype(str).str.strip().str.casefold().eq("fjl - fim da jornada laborativa")
 
 def _colunas_padrao_coordenadas():
     return ['Instalação', 'Latitude', 'Longitude']
-
 
 def _padronizar_coordenadas(df_raw):
     if df_raw.empty:
@@ -279,7 +276,6 @@ def _padronizar_coordenadas(df_raw):
     df['Longitude'] = pd.to_numeric(df_raw[col_lon], errors="coerce") if col_lon else pd.NA
     return df
 
-
 def _carregar_coordenadas_local():
     conn = sqlite3.connect(DB_PATH)
     try:
@@ -289,7 +285,6 @@ def _carregar_coordenadas_local():
     finally:
         conn.close()
     return _padronizar_coordenadas(df_raw)
-
 
 def _vincular_coordenadas_designados(df_designados, df_coordenadas):
     if df_designados.empty or df_coordenadas.empty:
@@ -318,18 +313,18 @@ def _vincular_coordenadas_designados(df_designados, df_coordenadas):
     df_merge["Longitude"] = df_merge["Longitude"].fillna(df_merge["Longitude Coord"])
     return df_merge.drop(columns=["_chave_cliente", "Latitude Coord", "Longitude Coord"])
 
-
 @st.cache_data(ttl=3600)
 def carregar_dados():
     if "gsheet_id" in st.secrets:
-        df, df_designados, df_coordenadas = _carregar_gsheet()
+        df, df_coordenadas = _carregar_gsheet()
     else:
         df = _carregar_local()
-        df_designados = _carregar_designados_local()
         df_coordenadas = _carregar_coordenadas_local()
     df = _aplicar_tramites(df)
-    return df, df_designados, df_coordenadas
-
+    mascara_fjl = _mascara_fim_jornada(df)
+    df_designados = _gerar_designados_fim_jornada(df)
+    df_execucao = df.loc[~mascara_fjl].copy() if mascara_fjl.any() else df
+    return df_execucao, df_designados, df_coordenadas
 
 try:
     df, df_designados, df_coordenadas = carregar_dados()
@@ -343,7 +338,7 @@ try:
     COL_HORA_FIM = _selecionar_coluna(df, ["Data Fim", "Data Final"]) or COL_DATA
     COL_STATUS = _selecionar_coluna(df, ["Estado TdC", "Estado", "Resultado"]) or "Resultado"
     COL_RETORNO = _selecionar_coluna(df, ["Resultado", "Retorno"]) or COL_STATUS
-    COL_SETOR = _selecionar_coluna(df, ["Tipo TdC", "Tipo Serviço", "Setor"]) or "Tipo TdC"
+    COL_SETOR = "Tipo TdC"
     COL_TRAMITE = _selecionar_coluna(df, ["Tramite", "Trâmite"]) or "Tramite"
     COL_CAUSA = _selecionar_coluna(df, ["Causa/Descritivo Resultado", "Causa", "Descritivo"]) or "Causa/Descritivo Resultado"
     COL_D_ID = 'Código TdC'
@@ -429,7 +424,7 @@ try:
     if todos_setores:
         setores_selecionados = setores_disponiveis
     else:
-        setores_selecionados = st.sidebar.multiselect("🏢 Setores (Tipo TdC)", setores_disponiveis)
+        setores_selecionados = st.sidebar.multiselect("🏢 Setores ", setores_disponiveis)
 
     df_f2 = df_f1[df_f1[COL_SETOR].isin(setores_selecionados)]
 
@@ -691,7 +686,6 @@ try:
                 equipe_html = html_lib.escape(str(row[COL_D_EQUIPE]), quote=True)
                 data_html = html_lib.escape(str(row["Data_BR"]), quote=True)
                 tipo_html = html_lib.escape(str(row[COL_D_TIPO]), quote=True)
-                endereco_html = html_lib.escape(str(row[COL_D_ENDERECO]), quote=True)
 
                 popup_designado_html = f"""
                 <div style="width: 260px; font-family: Arial, sans-serif;">
@@ -712,10 +706,6 @@ try:
                         <tr style="border-bottom: 1px solid #ddd;">
                             <td style="padding: 4px; font-weight: bold;">Tipo Serviço:</td>
                             <td style="padding: 4px;">{tipo_html}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid #ddd;">
-                            <td style="padding: 4px; font-weight: bold;">Endereço:</td>
-                            <td style="padding: 4px;">{endereco_html}</td>
                         </tr>
                     </table>
                 </div>
