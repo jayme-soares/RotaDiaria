@@ -6,13 +6,127 @@ from branca.element import Element
 import matplotlib.colors as mcolors
 import sqlite3
 import os
+import base64
 import html as html_lib
 
 # Configuração da página do Streamlit
 st.set_page_config(page_title="Visualizador de Rotas de Campo", layout="wide")
 
+DB_PATH = r"C:\Users\CENEGED\Documents\BI_SOC\Bases de dados\soc-marica.db"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TRAMITES_PATH = os.path.join(SCRIPT_DIR, "Tramites.xlsx")
+LOGOS_DIR = os.path.join(SCRIPT_DIR, "src", "logos")
+
+LOGO_FULL_LIGHT_PATH = os.path.join(LOGOS_DIR, "Full-light.png")
+LOGO_FULL_DARK_PATH = os.path.join(LOGOS_DIR, "Full-dark.png")
+LOGO_LIGHT_PATH = os.path.join(LOGOS_DIR, "Logo_light.png")
+LOGO_DARK_PATH = os.path.join(LOGOS_DIR, "Logo-dark.png")
+LOGO_ICON_PATH = os.path.join(LOGOS_DIR, "Icon.png")
+
+
+def _arquivo_para_data_uri(path):
+    if not os.path.exists(path):
+        return ""
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("utf-8")
+    ext = os.path.splitext(path)[1].lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    return f"data:{mime};base64,{encoded}"
+
+
+def _render_logo_tema(light_path, dark_path, max_width=440, container=None):
+    light_uri = _arquivo_para_data_uri(light_path)
+    dark_uri = _arquivo_para_data_uri(dark_path)
+    if not light_uri and not dark_uri:
+        return False
+    if not light_uri:
+        light_uri = dark_uri
+    if not dark_uri:
+        dark_uri = light_uri
+
+    target = container if container is not None else st
+    target.markdown(
+        f"""
+        <style>
+        .rd-logo-wrap {{
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            margin: .2rem 0 1rem 0;
+        }}
+        .rd-logo-wrap img {{
+            width: min(96vw, {int(max_width)}px);
+            height: auto;
+        }}
+        .rd-logo-dark {{ display: none; }}
+        html[data-theme="dark"] .rd-logo-light {{ display: none; }}
+        html[data-theme="dark"] .rd-logo-dark {{ display: block; }}
+        </style>
+        <div class="rd-logo-wrap">
+            <img class="rd-logo-light" src="{light_uri}" alt="Logo da aplicação">
+            <img class="rd-logo-dark" src="{dark_uri}" alt="Logo da aplicação">
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return True
+
+
+def _render_sidebar_icon(container):
+    icon_uri = _arquivo_para_data_uri(LOGO_ICON_PATH)
+    if not icon_uri:
+        container.empty()
+        return
+    container.markdown(
+        f"""
+        <div style="display:flex; justify-content:center; margin:.15rem 0 .55rem 0;">
+            <img src="{icon_uri}" alt="Ícone" style="width:42px; height:42px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.25);" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_icono_sidebar_recolhida():
+    icon_uri = _arquivo_para_data_uri(LOGO_ICON_PATH)
+    if not icon_uri:
+        return
+    st.markdown(
+        f"""
+        <style>
+        .rd-corner-icon {{
+            position: fixed;
+            top: 0.55rem;
+            left: 3.2rem;
+            z-index: 10010;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }}
+        .rd-corner-icon img {{
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.25);
+        }}
+        html:has(section[data-testid="stSidebar"][aria-expanded="false"]) .rd-corner-icon {{
+            display: flex;
+        }}
+        html:has(section[data-testid="stSidebar"][aria-expanded="true"]) .rd-corner-icon {{
+            display: none;
+        }}
+        </style>
+        <div class="rd-corner-icon">
+            <img src="{icon_uri}" alt="Ícone da aplicação" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # --- Autenticação ---
 def tela_login():
+    _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=420)
     st.title("🔒 Acesso Restrito")
     st.info("Solicite a senha ao responsável técnico.")
     senha = st.text_input("Senha de acesso", type="password", key="senha_input")
@@ -31,16 +145,17 @@ if "authenticated" not in st.session_state:
 if not st.session_state.get("authenticated"):
     st.stop()
 
-st.title("📍 Rotas de Equipes")
+main_logo_slot = st.empty()
+_render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=460, container=main_logo_slot)
+st.caption("Monitoramento e Análise de Gestão Operacional")
+
+sidebar_logo_slot = st.sidebar.empty()
+_render_sidebar_icon(sidebar_logo_slot)
+_render_icono_sidebar_recolhida()
 
 if st.sidebar.button("Sair"):
     st.session_state.pop("authenticated", None)
     st.rerun()
-
-
-DB_PATH = r"C:\Users\CENEGED\Documents\BI_SOC\Bases de dados\soc-marica.db"
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TRAMITES_PATH = os.path.join(SCRIPT_DIR, "Tramites.xlsx")
 
 
 def _carregar_local():
@@ -444,6 +559,12 @@ try:
     else:
         status_selecionados = st.sidebar.multiselect("✅ Status da Atividade", status_disponiveis)
 
+    filtros_aplicados = bool(
+        setores_selecionados
+        or equipes_selecionadas
+        or (not todos_status and status_selecionados)
+    )
+
     df_filtrado = df_f3[df_f3[COL_STATUS].isin(status_selecionados)]
 
     df_filtrado = df_filtrado.dropna(subset=[COL_LAT, COL_LON])
@@ -490,7 +611,7 @@ try:
             total_rastro_arquivos = len(rastros_processados)
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🗂️ Designados")
+    st.sidebar.subheader("Designados")
     exibir_designados = st.sidebar.checkbox("Exibir camada de designados", value=True)
 
     # Referência de execução para identificar "sobra":
@@ -533,8 +654,13 @@ try:
 
     tem_rastro_visivel = exibir_rastro_veiculo and total_rastro_arquivos > 0
     if df_filtrado.empty and (not exibir_designados or df_designados_filtrado.empty) and not tem_rastro_visivel:
+        _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=460, container=main_logo_slot)
         st.warning("Nenhum dado encontrado com os filtros selecionados.")
     else:
+        if filtros_aplicados:
+            _render_logo_tema(LOGO_LIGHT_PATH, LOGO_DARK_PATH, max_width=180, container=main_logo_slot)
+        else:
+            _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=460, container=main_logo_slot)
         latitudes = []
         longitudes = []
         if not df_filtrado.empty:
