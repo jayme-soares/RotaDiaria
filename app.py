@@ -10,7 +10,11 @@ import base64
 import html as html_lib
 
 # Configuração da página do Streamlit
-st.set_page_config(page_title="Visualizador de Rotas de Campo", layout="wide")
+st.set_page_config(
+    page_title="MAGO",
+    page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "logos", "Icon.png"),
+    layout="wide"
+)
 
 DB_PATH = r"C:\Users\CENEGED\Documents\BI_SOC\Bases de dados\soc-marica.db"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
