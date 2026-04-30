@@ -8,6 +8,7 @@ import sqlite3
 import os
 import base64
 import time
+import requests
 import html as html_lib
 
 # Configuração da página do Streamlit
@@ -29,6 +30,9 @@ LOGO_DARK_PATH = os.path.join(LOGOS_DIR, "Logo-dark.png")
 LOGO_ICON_PATH = os.path.join(LOGOS_DIR, "Icon.png")
 INTRO_WEBM_PATH = os.path.join(LOGOS_DIR, "intro.webm")
 INTRO_MP4_PATH = os.path.join(LOGOS_DIR, "intro.mp4")
+
+SETORES_VALIDOS = ["SOC", "NEGOCIACAO"]
+SETORES_LABEL = {"SOC": "SOC", "NEGOCIACAO": "Negociação"}
 
 
 @st.cache_data(show_spinner=False)
@@ -238,30 +242,486 @@ def _render_loading_animado(container=None):
         unsafe_allow_html=True,
     )
 
+
+def _setores_para_storage(setores):
+    setores_norm = [s for s in setores if s in SETORES_VALIDOS]
+    return ",".join(dict.fromkeys(setores_norm))
+
+
+def _setores_do_storage(valor):
+    if not valor:
+        return []
+    setores = [s.strip().upper() for s in str(valor).split(",") if str(s).strip()]
+    return [s for s in setores if s in SETORES_VALIDOS]
+
+
+def _setor_label(valor):
+    if valor is None:
+        return ""
+    return SETORES_LABEL.get(str(valor), str(valor))
+
+
+def _supabase_config():
+    return {
+        "url": st.secrets.get("supabase_url", "").rstrip("/"),
+        "anon_key": st.secrets.get("supabase_anon_key", ""),
+        "service_key": st.secrets.get("supabase_service_role_key", ""),
+        "admin_emails": [
+            e.strip().lower()
+            for e in str(st.secrets.get("auth_admin_emails", "")).split(",")
+            if e.strip()
+        ],
+    }
+
+
+def _supabase_request(method, path, use_service=False, bearer_token=None, params=None, json_data=None, timeout=20, extra_headers=None):
+    cfg = _supabase_config()
+    base_url = cfg["url"]
+    if not base_url:
+        raise RuntimeError("Supabase não configurado: defina supabase_url em st.secrets.")
+
+    key = cfg["service_key"] if use_service else cfg["anon_key"]
+    if not key:
+        segredo = "supabase_service_role_key" if use_service else "supabase_anon_key"
+        raise RuntimeError(f"Supabase não configurado: defina {segredo} em st.secrets.")
+
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {bearer_token or key}",
+        "Content-Type": "application/json",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    resp = requests.request(
+        method=method,
+        url=f"{base_url}{path}",
+        headers=headers,
+        params=params,
+        json=json_data,
+        timeout=timeout,
+    )
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(f"Supabase erro ({resp.status_code}): {detail}")
+
+    if not resp.text.strip():
+        return None
+    try:
+        return resp.json()
+    except Exception:
+        return resp.text
+
+
+def _supabase_signup(email, password, full_name):
+    return _supabase_request(
+        "POST",
+        "/auth/v1/signup",
+        use_service=False,
+        json_data={"email": email, "password": password, "data": {"full_name": full_name}},
+    )
+
+
+def _supabase_signin(email, password):
+    return _supabase_request(
+        "POST",
+        "/auth/v1/token",
+        use_service=False,
+        params={"grant_type": "password"},
+        json_data={"email": email, "password": password},
+    )
+
+
+def _supabase_send_recovery_email(email):
+    payload = {"email": email}
+    redirect_to = str(st.secrets.get("supabase_recovery_redirect_url", "")).strip()
+    if redirect_to:
+        payload["redirect_to"] = redirect_to
+    return _supabase_request(
+        "POST",
+        "/auth/v1/recover",
+        use_service=False,
+        json_data=payload,
+    )
+
+
+def _supabase_generate_recovery_link(email):
+    payload = {"type": "recovery", "email": email}
+    redirect_to = str(st.secrets.get("supabase_recovery_redirect_url", "")).strip()
+    if redirect_to:
+        payload["redirect_to"] = redirect_to
+    data = _supabase_request(
+        "POST",
+        "/auth/v1/admin/generate_link",
+        use_service=True,
+        json_data=payload,
+    )
+    return data if isinstance(data, dict) else {}
+
+
+def _supabase_upsert_profile(profile):
+    data = _supabase_request(
+        "POST",
+        "/rest/v1/user_profiles",
+        use_service=True,
+        params={"on_conflict": "user_id"},
+        json_data=profile,
+        extra_headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+    )
+    return data
+
+
+def _supabase_get_profile(user_id):
+    rows = _supabase_request(
+        "GET",
+        "/rest/v1/user_profiles",
+        use_service=True,
+        params={"user_id": f"eq.{user_id}", "select": "*", "limit": "1"},
+    ) or []
+    return rows[0] if rows else None
+
+
+def _supabase_list_profiles():
+    return _supabase_request(
+        "GET",
+        "/rest/v1/user_profiles",
+        use_service=True,
+        params={"select": "*", "order": "created_at.desc"},
+    ) or []
+
+
+def _supabase_insert_login_event(evento):
+    return _supabase_request(
+        "POST",
+        "/rest/v1/user_login_events",
+        use_service=True,
+        json_data=evento,
+        extra_headers={"Prefer": "return=minimal"},
+    )
+
+
+def _supabase_list_login_events(limit=200):
+    return _supabase_request(
+        "GET",
+        "/rest/v1/user_login_events",
+        use_service=True,
+        params={"select": "*", "order": "logged_at.desc", "limit": str(limit)},
+    ) or []
+
+
+def _supabase_admin_users():
+    data = _supabase_request(
+        "GET",
+        "/auth/v1/admin/users",
+        use_service=True,
+        params={"page": "1", "per_page": "1000"},
+    ) or {}
+    users = data.get("users", []) if isinstance(data, dict) else []
+    return {u.get("id"): u for u in users if u.get("id")}
+
+
+def _supabase_signout(access_token):
+    if not access_token:
+        return
+    try:
+        _supabase_request("POST", "/auth/v1/logout", use_service=False, bearer_token=access_token)
+    except Exception:
+        pass
+
+
+def _formatar_erro(msg):
+    texto = str(msg)
+    texto_lower = texto.lower()
+    if "relation" in texto and "does not exist" in texto:
+        return "Estrutura de autenticação não encontrada no Supabase. Crie a tabela user_profiles."
+    if "user_login_events" in texto and "does not exist" in texto:
+        return "Tabela de auditoria não encontrada no Supabase. Execute o SQL atualizado (user_login_events)."
+    if "invalid_credentials" in texto_lower or "invalid login credentials" in texto_lower:
+        return "E-mail ou senha inválidos. Se ainda não possui acesso, faça seu cadastro e aguarde aprovação."
+    if "email_not_confirmed" in texto_lower:
+        return "Seu e-mail ainda não foi confirmado no Supabase."
+    if "user already registered" in texto_lower:
+        return "Este e-mail já está cadastrado. Tente entrar ou recuperar a senha."
+    if "over_email_send_rate_limit" in texto_lower:
+        return "Limite de envio de e-mail atingido no Supabase. Aguarde alguns minutos e tente novamente."
+    return texto
+
+
+def _bootstrap_admin_profile(user_id, email, full_name):
+    cfg = _supabase_config()
+    if email.lower() not in cfg["admin_emails"]:
+        return
+    _supabase_upsert_profile({
+        "user_id": user_id,
+        "full_name": full_name or "",
+        "role": "admin",
+        "status": "active",
+        "requested_sectors": _setores_para_storage(SETORES_VALIDOS),
+        "allowed_sectors": _setores_para_storage(SETORES_VALIDOS),
+    })
+
+
+def _aplicar_login_sessao(auth_payload):
+    auth_data = auth_payload if isinstance(auth_payload, dict) else {}
+    user_raw = auth_data.get("user")
+    user = user_raw if isinstance(user_raw, dict) else {}
+    email = (user.get("email") or "").strip().lower()
+    user_id = user.get("id")
+    user_meta_raw = user.get("user_metadata")
+    user_metadata = user_meta_raw if isinstance(user_meta_raw, dict) else {}
+    full_name = user_metadata.get("full_name") or ""
+
+    if not user_id:
+        raise RuntimeError("Resposta de login sem usuário.")
+
+    _bootstrap_admin_profile(user_id, email, full_name)
+    profile_raw = _supabase_get_profile(user_id)
+    profile = profile_raw if isinstance(profile_raw, dict) else None
+    if not profile:
+        raise RuntimeError("Usuário sem perfil no sistema. Solicite aprovação do administrador.")
+
+    status = (profile.get("status") or "pending").lower()
+    if status == "pending":
+        raise RuntimeError("Seu cadastro está pendente de aprovação do administrador.")
+    if status == "blocked":
+        raise RuntimeError("Seu acesso está bloqueado. Procure um administrador.")
+
+    allowed_sectors = _setores_do_storage(profile.get("allowed_sectors"))
+    if not allowed_sectors:
+        raise RuntimeError("Seu usuário foi aprovado, mas ainda sem setor liberado.")
+
+    active_sector = st.session_state.get("active_sector")
+    if active_sector not in allowed_sectors:
+        active_sector = allowed_sectors[0]
+    st.session_state["active_sector"] = active_sector
+
+    st.session_state["auth_user"] = {
+        "user_id": user_id,
+        "email": email,
+        "full_name": profile.get("full_name") or full_name or email,
+        "role": (profile.get("role") or "user").lower(),
+        "status": status,
+        "allowed_sectors": allowed_sectors,
+        "access_token": auth_data.get("access_token"),
+    }
+    try:
+        _supabase_insert_login_event({
+            "user_id": user_id,
+            "email": email,
+            "full_name": profile.get("full_name") or full_name or email,
+            "role": (profile.get("role") or "user").lower(),
+            "sector_at_login": active_sector,
+            "event_type": "login_success",
+        })
+    except Exception as e:
+        st.session_state["auth_warning"] = _formatar_erro(e)
+
+
+def _logout():
+    auth_user = st.session_state.get("auth_user")
+    auth_user = auth_user if isinstance(auth_user, dict) else {}
+    _supabase_signout(auth_user.get("access_token"))
+    for chave in ["auth_user", "active_sector", "filtro_mes_ano", "filtro_data", "assinatura_filtros"]:
+        st.session_state.pop(chave, None)
+    st.session_state["intro_exibida"] = False
+    st.rerun()
+
+
+def _render_admin_painel():
+    st.subheader("Administração de usuários")
+    st.caption("Aprove cadastros e ajuste função/setores a qualquer momento.")
+
+    try:
+        profiles = _supabase_list_profiles()
+        auth_users = _supabase_admin_users()
+    except Exception as e:
+        st.error(_formatar_erro(e))
+        return
+
+    profiles = [p for p in profiles if isinstance(p, dict)]
+    auth_users = auth_users if isinstance(auth_users, dict) else {}
+    if not profiles:
+        st.info("Ainda não há usuários cadastrados.")
+        return
+
+    status_labels = {"pending": "Pendente", "active": "Ativo", "blocked": "Bloqueado"}
+    role_options = ["user", "admin"]
+    status_options = ["pending", "active", "blocked"]
+
+    for profile in profiles:
+        user_id = profile.get("user_id")
+        auth_data = auth_users.get(user_id, {})
+        auth_data = auth_data if isinstance(auth_data, dict) else {}
+        email = auth_data.get("email", "(email não encontrado)")
+        user_meta_raw = auth_data.get("user_metadata")
+        user_metadata = user_meta_raw if isinstance(user_meta_raw, dict) else {}
+        nome = profile.get("full_name") or user_metadata.get("full_name") or "Sem nome"
+        role_atual = (profile.get("role") or "user").lower()
+        status_atual = (profile.get("status") or "pending").lower()
+        setores_liberados = _setores_do_storage(profile.get("allowed_sectors"))
+        setores_solicitados = _setores_do_storage(profile.get("requested_sectors"))
+
+        with st.expander(f"{nome} • {email} • {status_labels.get(status_atual, status_atual)}"):
+            c1, c2 = st.columns(2)
+            with c1:
+                novo_role = st.selectbox("Função", role_options, index=role_options.index(role_atual) if role_atual in role_options else 0, key=f"role_{user_id}")
+            with c2:
+                novo_status = st.selectbox("Status", status_options, index=status_options.index(status_atual) if status_atual in status_options else 0, key=f"status_{user_id}")
+
+            st.caption(f"Setores solicitados: {', '.join(_setor_label(s) for s in setores_solicitados) or 'Nenhum'}")
+            novos_setores = st.multiselect(
+                "Setores liberados",
+                options=SETORES_VALIDOS,
+                default=setores_liberados,
+                format_func=_setor_label,
+                key=f"setores_{user_id}",
+            )
+
+            c3, c4 = st.columns(2)
+            with c3:
+                if st.button("Enviar reset por e-mail", key=f"reset_email_{user_id}"):
+                    try:
+                        _supabase_send_recovery_email(str(email).strip().lower())
+                        st.success("Solicitação de recuperação enviada.")
+                    except Exception as e:
+                        st.error(_formatar_erro(e))
+            with c4:
+                if st.button("Gerar link de reset", key=f"reset_link_{user_id}"):
+                    try:
+                        data_link = _supabase_generate_recovery_link(str(email).strip().lower())
+                        action_link = data_link.get("action_link")
+                        if not action_link and isinstance(data_link.get("properties"), dict):
+                            action_link = data_link["properties"].get("action_link")
+                        if action_link:
+                            st.session_state[f"recovery_link_{user_id}"] = action_link
+                            st.success("Link de recuperação gerado.")
+                        else:
+                            st.warning("Não foi possível obter o link na resposta do Supabase.")
+                    except Exception as e:
+                        st.error(_formatar_erro(e))
+
+            link_memoria = st.session_state.get(f"recovery_link_{user_id}")
+            if link_memoria:
+                st.caption("Link de recuperação (uso administrativo):")
+                st.code(link_memoria)
+
+            if st.button("Salvar usuário", key=f"save_{user_id}"):
+                try:
+                    _supabase_upsert_profile({
+                        "user_id": user_id,
+                        "full_name": profile.get("full_name") or nome,
+                        "role": novo_role,
+                        "status": novo_status,
+                        "requested_sectors": profile.get("requested_sectors") or _setores_para_storage(setores_solicitados),
+                        "allowed_sectors": _setores_para_storage(novos_setores),
+                    })
+                    st.success("Usuário atualizado.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(_formatar_erro(e))
+
+    st.markdown("---")
+    st.subheader("Logs de acesso")
+    try:
+        eventos = _supabase_list_login_events(limit=300)
+    except Exception as e:
+        st.error(_formatar_erro(e))
+        return
+
+    eventos = [e for e in eventos if isinstance(e, dict)]
+    if not eventos:
+        st.info("Sem registros de login até o momento.")
+        return
+
+    df_logs = pd.DataFrame(eventos)
+    if "logged_at" in df_logs.columns:
+        dt = pd.to_datetime(df_logs["logged_at"], errors="coerce", utc=True).dt.tz_convert("America/Sao_Paulo")
+        df_logs["Data/Hora"] = dt.dt.strftime("%d/%m/%Y %H:%M:%S")
+    colunas = [c for c in ["Data/Hora", "full_name", "email", "role", "sector_at_login", "event_type"] if c in df_logs.columns]
+    st.dataframe(df_logs[colunas], use_container_width=True, height=320)
+
 # --- Autenticação ---
 def tela_login():
-    _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=420)
-    st.title("🔒 Acesso Restrito")
-    st.info("Solicite a senha ao responsável técnico.")
-    senha = st.text_input("Senha de acesso", type="password", key="senha_input")
-    if st.button("Entrar"):
-        senha_secrets = st.secrets.get("password", "")
-        if senha_secrets and senha == senha_secrets:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        st.error("Senha incorreta. Tente novamente.")
+    _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=440)
+    st.title("Acesso ao MAGO")
+    st.text("Monitoramento e Acompanhamento de Gestão Operacional")
+    st.caption("Faça login ou Cadastre-se (necessário aprovação de um admin)")
 
-if "authenticated" not in st.session_state:
+    tab_login, tab_cadastro = st.tabs(["Entrar", "Cadastrar"])
+
+    with tab_login:
+        with st.form("form_login", clear_on_submit=False):
+            email = st.text_input("E-mail", key="login_email").strip().lower()
+            senha = st.text_input("Senha", type="password", key="login_senha")
+            entrar = st.form_submit_button("Entrar")
+        if entrar:
+            try:
+                auth_payload = _supabase_signin(email=email, password=senha)
+                _aplicar_login_sessao(auth_payload)
+                st.rerun()
+            except Exception as e:
+                st.error(_formatar_erro(e))
+
+        with st.expander("Esqueci minha senha"):
+            email_rec = st.text_input("E-mail para recuperação", key="recover_email").strip().lower()
+            if st.button("Enviar link de recuperação", key="btn_recover_self"):
+                if not email_rec:
+                    st.error("Informe o e-mail para recuperação.")
+                else:
+                    try:
+                        _supabase_send_recovery_email(email_rec)
+                        st.success("Se o e-mail estiver cadastrado, o link de recuperação foi enviado.")
+                    except Exception as e:
+                        st.error(_formatar_erro(e))
+
+    with tab_cadastro:
+        with st.form("form_cadastro", clear_on_submit=True):
+            nome = st.text_input("Nome completo", key="cad_nome").strip()
+            email_cad = st.text_input("E-mail", key="cad_email").strip().lower()
+            senha_cad = st.text_input("Senha", type="password", key="cad_senha")
+            senha_conf = st.text_input("Confirmar senha", type="password", key="cad_senha_conf")
+            setores_req = st.multiselect("Setor(es) solicitado(s)", SETORES_VALIDOS, default=["SOC"], format_func=_setor_label, key="cad_setores")
+            cadastrar = st.form_submit_button("Solicitar cadastro")
+
+        if cadastrar:
+            if not nome or not email_cad or not senha_cad:
+                st.error("Preencha nome, e-mail e senha.")
+            elif senha_cad != senha_conf:
+                st.error("As senhas não conferem.")
+            elif len(senha_cad) < 8:
+                st.error("A senha deve ter ao menos 8 caracteres.")
+            else:
+                try:
+                    signup = _supabase_signup(email=email_cad, password=senha_cad, full_name=nome)
+                    signup_data = signup if isinstance(signup, dict) else {}
+                    user_raw = signup_data.get("user")
+                    user = user_raw if isinstance(user_raw, dict) else {}
+                    user_id = user.get("id")
+                    if not user_id:
+                        raise RuntimeError("Não foi possível criar o usuário no Supabase.")
+
+                    _supabase_upsert_profile({
+                        "user_id": user_id,
+                        "full_name": nome,
+                        "role": "user",
+                        "status": "pending",
+                        "requested_sectors": _setores_para_storage(setores_req),
+                        "allowed_sectors": "",
+                    })
+                    st.success("Cadastro recebido. Aguarde aprovação do administrador.")
+                except Exception as e:
+                    st.error(_formatar_erro(e))
+
+
+if "auth_user" not in st.session_state:
     if not st.session_state.get("intro_exibida"):
         if _render_intro_tela_cheia():
             time.sleep(3.2)
         st.session_state["intro_exibida"] = True
         st.rerun()
     tela_login()
-    st.stop()
-
-# --- Aplicação Principal ---
-if not st.session_state.get("authenticated"):
     st.stop()
 
 loading_overlay_slot = None
@@ -273,15 +733,37 @@ if st.session_state.pop("exibir_loading_filtros", False):
 main_logo_slot = st.empty()
 _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=460, container=main_logo_slot)
 st.caption("Monitoramento e Análise de Gestão Operacional")
+if st.session_state.get("auth_warning"):
+    st.warning(st.session_state.pop("auth_warning"))
 
 sidebar_logo_slot = st.sidebar.empty()
 _render_sidebar_icon(sidebar_logo_slot)
 _render_icono_sidebar_recolhida()
+auth_user = st.session_state.get("auth_user", {})
+auth_user = auth_user if isinstance(auth_user, dict) else {}
+st.sidebar.caption(f"Usuário: {auth_user.get('full_name', '')}")
+st.sidebar.caption(f"Perfil: {auth_user.get('role', 'user').upper()}")
+
+setores_liberados = auth_user.get("allowed_sectors", [])
+if not isinstance(setores_liberados, list):
+    setores_liberados = _setores_do_storage(setores_liberados)
+if setores_liberados:
+    setor_ativo = st.sidebar.selectbox(
+        "Setor ativo",
+        options=setores_liberados,
+        format_func=_setor_label,
+        key="active_sector",
+    )
+else:
+    setor_ativo = None
+
+area_options = ["Mapa"]
+if auth_user.get("role") == "admin":
+    area_options.append("Administração")
+area_escolhida = st.sidebar.radio("Área", area_options, index=0)
 
 if st.sidebar.button("Sair"):
-    st.session_state.pop("authenticated", None)
-    st.session_state["intro_exibida"] = False
-    st.rerun()
+    _logout()
 
 
 def _carregar_local():
@@ -566,6 +1048,20 @@ def carregar_dados():
     df_designados = _gerar_designados_fim_jornada(df)
     df_execucao = df.loc[~mascara_fjl].copy() if mascara_fjl.any() else df
     return df_execucao, df_designados, df_coordenadas
+
+
+if area_escolhida == "Administração":
+    _render_admin_painel()
+    st.stop()
+
+if not setor_ativo:
+    st.error("Seu usuário não possui setor liberado.")
+    st.stop()
+
+if setor_ativo != "SOC":
+    _render_logo_tema(LOGO_LIGHT_PATH, LOGO_DARK_PATH, max_width=220, container=main_logo_slot)
+    st.info(f"O módulo do setor **{_setor_label(setor_ativo)}** está em desenvolvimento. Em breve.")
+    st.stop()
 
 try:
     df, df_designados, df_coordenadas = carregar_dados()
