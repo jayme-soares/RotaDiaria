@@ -7,3 +7,4 @@ matplotlib
 gspread
 google-auth
 requests
+streamlit-autorefresh

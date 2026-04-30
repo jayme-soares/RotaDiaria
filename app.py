@@ -8,8 +8,14 @@ import sqlite3
 import os
 import base64
 import time
+import uuid
 import requests
 import html as html_lib
+try:
+    from streamlit_autorefresh import st_autorefresh
+except Exception:
+    def st_autorefresh(*args, **kwargs):
+        return 0
 
 # Configuração da página do Streamlit
 st.set_page_config(
@@ -261,6 +267,50 @@ def _setor_label(valor):
     return SETORES_LABEL.get(str(valor), str(valor))
 
 
+def _formatar_duracao_segundos(total_segundos):
+    try:
+        segundos = int(total_segundos)
+    except Exception:
+        return ""
+    if segundos < 0:
+        segundos = 0
+    horas = segundos // 3600
+    minutos = (segundos % 3600) // 60
+    segs = segundos % 60
+    return f"{horas:02d}:{minutos:02d}:{segs:02d}"
+
+
+def _render_tempo_logado_realtime(session_started_at):
+    try:
+        ts = int(session_started_at)
+    except Exception:
+        ts = int(time.time())
+    components.html(
+        f"""
+        <div style="font-size:0.86rem; color: grey; margin:.2rem 0 .35rem 0;">
+            Tempo logado: <strong id="rd-session-clock">00:00:00</strong>
+        </div>
+        <script>
+          const startedAt = {ts};
+          function pad(n) {{ return String(n).padStart(2, "0"); }}
+          function tick() {{
+            const now = Math.floor(Date.now()/1000);
+            const elapsed = Math.max(0, now - startedAt);
+            const h = Math.floor(elapsed / 3600);
+            const m = Math.floor((elapsed % 3600) / 60);
+            const s = elapsed % 60;
+            const el = document.getElementById("rd-session-clock");
+            if (el) el.textContent = `${{pad(h)}}:${{pad(m)}}:${{pad(s)}}`;
+          }}
+          tick();
+          setInterval(tick, 1000);
+        </script>
+        """,
+        height=28,
+        scrolling=False,
+    )
+
+
 def _supabase_config():
     return {
         "url": st.secrets.get("supabase_url", "").rstrip("/"),
@@ -438,6 +488,8 @@ def _formatar_erro(msg):
         return "Estrutura de autenticação não encontrada no Supabase. Crie a tabela user_profiles."
     if "user_login_events" in texto and "does not exist" in texto:
         return "Tabela de auditoria não encontrada no Supabase. Execute o SQL atualizado (user_login_events)."
+    if "session_duration_seconds" in texto_lower or "logout_reason" in texto_lower or "session_id" in texto_lower:
+        return "Estrutura de auditoria desatualizada no Supabase. Reexecute o supabase_auth_schema.sql atualizado."
     if "invalid_credentials" in texto_lower or "invalid login credentials" in texto_lower:
         return "E-mail ou senha inválidos. Se ainda não possui acesso, faça seu cadastro e aguarde aprovação."
     if "email_not_confirmed" in texto_lower:
@@ -496,6 +548,11 @@ def _aplicar_login_sessao(auth_payload):
     if active_sector not in allowed_sectors:
         active_sector = allowed_sectors[0]
     st.session_state["active_sector"] = active_sector
+    session_started_at = int(time.time())
+    session_id = str(uuid.uuid4())
+    st.session_state["session_started_at"] = session_started_at
+    st.session_state["last_activity_at"] = session_started_at
+    st.session_state["session_id"] = session_id
 
     st.session_state["auth_user"] = {
         "user_id": user_id,
@@ -505,6 +562,7 @@ def _aplicar_login_sessao(auth_payload):
         "status": status,
         "allowed_sectors": allowed_sectors,
         "access_token": auth_data.get("access_token"),
+        "session_id": session_id,
     }
     try:
         _supabase_insert_login_event({
@@ -514,16 +572,41 @@ def _aplicar_login_sessao(auth_payload):
             "role": (profile.get("role") or "user").lower(),
             "sector_at_login": active_sector,
             "event_type": "login_success",
+            "session_id": session_id,
+            "session_duration_seconds": 0,
+            "logout_reason": "",
         })
     except Exception as e:
         st.session_state["auth_warning"] = _formatar_erro(e)
 
 
-def _logout():
+def _logout(reason="manual"):
     auth_user = st.session_state.get("auth_user")
     auth_user = auth_user if isinstance(auth_user, dict) else {}
+    session_started_at = st.session_state.get("session_started_at")
+    now_ts = int(time.time())
+    duracao = max(0, now_ts - int(session_started_at)) if session_started_at else 0
+    if auth_user.get("user_id"):
+        try:
+            _supabase_insert_login_event({
+                "user_id": auth_user.get("user_id"),
+                "email": auth_user.get("email", ""),
+                "full_name": auth_user.get("full_name", ""),
+                "role": auth_user.get("role", "user"),
+                "sector_at_login": st.session_state.get("active_sector", ""),
+                "event_type": "logout",
+                "session_id": auth_user.get("session_id") or st.session_state.get("session_id", ""),
+                "session_duration_seconds": duracao,
+                "logout_reason": reason,
+            })
+        except Exception as e:
+            st.session_state["auth_warning"] = _formatar_erro(e)
+
     _supabase_signout(auth_user.get("access_token"))
-    for chave in ["auth_user", "active_sector", "filtro_mes_ano", "filtro_data", "assinatura_filtros"]:
+    for chave in [
+        "auth_user", "active_sector", "filtro_mes_ano", "filtro_data", "assinatura_filtros",
+        "session_started_at", "last_activity_at", "session_id", "_last_heartbeat_tick"
+    ]:
         st.session_state.pop(chave, None)
     st.session_state["intro_exibida"] = False
     st.rerun()
@@ -639,7 +722,12 @@ def _render_admin_painel():
     if "logged_at" in df_logs.columns:
         dt = pd.to_datetime(df_logs["logged_at"], errors="coerce", utc=True).dt.tz_convert("America/Sao_Paulo")
         df_logs["Data/Hora"] = dt.dt.strftime("%d/%m/%Y %H:%M:%S")
-    colunas = [c for c in ["Data/Hora", "full_name", "email", "role", "sector_at_login", "event_type"] if c in df_logs.columns]
+    if "session_duration_seconds" in df_logs.columns:
+        df_logs["Duração sessão"] = df_logs["session_duration_seconds"].apply(_formatar_duracao_segundos)
+    if "logout_reason" in df_logs.columns:
+        mapa_reason = {"manual": "Logout manual", "inactivity": "Inatividade"}
+        df_logs["Motivo logout"] = df_logs["logout_reason"].map(mapa_reason).fillna(df_logs["logout_reason"])
+    colunas = [c for c in ["Data/Hora", "full_name", "email", "role", "sector_at_login", "event_type", "Duração sessão", "Motivo logout"] if c in df_logs.columns]
     st.dataframe(df_logs[colunas], use_container_width=True, height=320)
 
 # --- Autenticação ---
@@ -741,8 +829,37 @@ _render_sidebar_icon(sidebar_logo_slot)
 _render_icono_sidebar_recolhida()
 auth_user = st.session_state.get("auth_user", {})
 auth_user = auth_user if isinstance(auth_user, dict) else {}
+
+idle_timeout_min = int(st.secrets.get("auth_idle_timeout_minutes", 30))
+idle_timeout_sec = max(60, idle_timeout_min * 60)
+heartbeat_sec = int(st.secrets.get("auth_heartbeat_seconds", 30))
+heartbeat_sec = min(max(heartbeat_sec, 10), 300)
+
+tick = st_autorefresh(interval=heartbeat_sec * 1000, key="auth_session_heartbeat")
+last_tick = st.session_state.get("_last_heartbeat_tick")
+is_heartbeat = last_tick is not None and tick != last_tick
+st.session_state["_last_heartbeat_tick"] = tick
+
+agora = int(time.time())
+if "session_started_at" not in st.session_state:
+    st.session_state["session_started_at"] = agora
+if "last_activity_at" not in st.session_state:
+    st.session_state["last_activity_at"] = agora
+
+if not is_heartbeat:
+    st.session_state["last_activity_at"] = agora
+
+tempo_logado_seg = max(0, agora - int(st.session_state.get("session_started_at", agora)))
+tempo_inativo_seg = max(0, agora - int(st.session_state.get("last_activity_at", agora)))
+if tempo_inativo_seg >= idle_timeout_sec:
+    _logout("inactivity")
+
 st.sidebar.caption(f"Usuário: {auth_user.get('full_name', '')}")
 st.sidebar.caption(f"Perfil: {auth_user.get('role', 'user').upper()}")
+with st.sidebar:
+    _render_tempo_logado_realtime(st.session_state.get("session_started_at", agora))
+
+
 
 setores_liberados = auth_user.get("allowed_sectors", [])
 if not isinstance(setores_liberados, list):
@@ -763,7 +880,7 @@ if auth_user.get("role") == "admin":
 area_escolhida = st.sidebar.radio("Área", area_options, index=0)
 
 if st.sidebar.button("Sair"):
-    _logout()
+    _logout("manual")
 
 
 def _carregar_local():
