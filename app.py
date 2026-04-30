@@ -7,6 +7,7 @@ import matplotlib.colors as mcolors
 import sqlite3
 import os
 import base64
+import time
 import html as html_lib
 
 # Configuração da página do Streamlit
@@ -26,15 +27,25 @@ LOGO_FULL_DARK_PATH = os.path.join(LOGOS_DIR, "Full-dark.png")
 LOGO_LIGHT_PATH = os.path.join(LOGOS_DIR, "Logo_light.png")
 LOGO_DARK_PATH = os.path.join(LOGOS_DIR, "Logo-dark.png")
 LOGO_ICON_PATH = os.path.join(LOGOS_DIR, "Icon.png")
+INTRO_WEBM_PATH = os.path.join(LOGOS_DIR, "intro.webm")
+INTRO_MP4_PATH = os.path.join(LOGOS_DIR, "intro.mp4")
 
 
+@st.cache_data(show_spinner=False)
 def _arquivo_para_data_uri(path):
     if not os.path.exists(path):
         return ""
     with open(path, "rb") as f:
         encoded = base64.b64encode(f.read()).decode("utf-8")
     ext = os.path.splitext(path)[1].lower()
-    mime = "image/png" if ext == ".png" else "image/jpeg"
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webm": "video/webm",
+        ".mp4": "video/mp4",
+    }
+    mime = mime_map.get(ext, "application/octet-stream")
     return f"data:{mime};base64,{encoded}"
 
 
@@ -128,6 +139,104 @@ def _render_icono_sidebar_recolhida():
         unsafe_allow_html=True,
     )
 
+
+def _obter_intro_uri():
+    if os.path.exists(INTRO_MP4_PATH):
+        return _arquivo_para_data_uri(INTRO_MP4_PATH)
+    if os.path.exists(INTRO_WEBM_PATH):
+        return _arquivo_para_data_uri(INTRO_WEBM_PATH)
+    return ""
+
+
+def _obter_loading_uri():
+    if os.path.exists(INTRO_WEBM_PATH):
+        return _arquivo_para_data_uri(INTRO_WEBM_PATH)
+    if os.path.exists(INTRO_MP4_PATH):
+        return _arquivo_para_data_uri(INTRO_MP4_PATH)
+    return ""
+
+
+def _render_intro_tela_cheia():
+    intro_uri = _obter_intro_uri()
+    if not intro_uri:
+        return False
+    st.markdown(
+        f"""
+        <style>
+        .rd-intro-overlay {{
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .rd-intro-overlay video {{
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+        }}
+        </style>
+        <div class="rd-intro-overlay">
+            <video autoplay muted playsinline>
+                <source src="{intro_uri}">
+            </video>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return True
+
+
+def _render_loading_animado(container=None):
+    intro_uri = _obter_loading_uri()
+    logo_light = _arquivo_para_data_uri(LOGO_LIGHT_PATH) or _arquivo_para_data_uri(LOGO_FULL_LIGHT_PATH)
+    logo_dark = _arquivo_para_data_uri(LOGO_DARK_PATH) or _arquivo_para_data_uri(LOGO_FULL_DARK_PATH)
+    if not logo_light and not logo_dark and not intro_uri:
+        return
+
+    target = container if container is not None else st
+    target.markdown(
+        f"""
+        <style>
+        .rd-loading-overlay-bg {{
+            position: fixed;
+            inset: 0;
+            z-index: 10030;
+            background: #000;
+            opacity: .6;
+        }}
+        .rd-loading-logo-wrap {{
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            margin: .2rem 0 1rem 0;
+            z-index: 10041;
+        }}
+        .rd-loading-logo-wrap video,
+        .rd-loading-logo-wrap img {{
+            width: min(96vw, 180px);
+            height: auto;
+            filter: drop-shadow(0 4px 16px rgba(0,0,0,.45));
+        }}
+        .rd-loading-dark {{ display: none; }}
+        html[data-theme="dark"] .rd-loading-light {{ display: none; }}
+        html[data-theme="dark"] .rd-loading-dark {{ display: block; }}
+        </style>
+        <div class="rd-loading-overlay-bg"></div>
+        <div class="rd-loading-logo-wrap">
+            {
+                f'<video autoplay muted loop playsinline><source src="{intro_uri}"></video>'
+                if intro_uri else f'<img class="rd-loading-light" src="{logo_light}" alt="Carregando" /><img class="rd-loading-dark" src="{logo_dark}" alt="Carregando" />'
+            }
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # --- Autenticação ---
 def tela_login():
     _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=420)
@@ -142,12 +251,23 @@ def tela_login():
         st.error("Senha incorreta. Tente novamente.")
 
 if "authenticated" not in st.session_state:
+    if not st.session_state.get("intro_exibida"):
+        if _render_intro_tela_cheia():
+            time.sleep(3.2)
+        st.session_state["intro_exibida"] = True
+        st.rerun()
     tela_login()
     st.stop()
 
 # --- Aplicação Principal ---
 if not st.session_state.get("authenticated"):
     st.stop()
+
+loading_overlay_slot = None
+if st.session_state.pop("exibir_loading_filtros", False):
+    loading_overlay_slot = st.empty()
+    _render_loading_animado(container=loading_overlay_slot)
+    time.sleep(1.1)
 
 main_logo_slot = st.empty()
 _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=460, container=main_logo_slot)
@@ -159,6 +279,7 @@ _render_icono_sidebar_recolhida()
 
 if st.sidebar.button("Sair"):
     st.session_state.pop("authenticated", None)
+    st.session_state["intro_exibida"] = False
     st.rerun()
 
 
@@ -518,7 +639,9 @@ try:
         st.stop()
     meses_labels = [f"{m.split('-')[1]}/{m.split('-')[0]}" for m in meses_disponiveis]
     mes_map = dict(zip(meses_labels, meses_disponiveis))
-    mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels)
+    if "filtro_mes_ano" not in st.session_state or st.session_state["filtro_mes_ano"] not in meses_labels:
+        st.session_state["filtro_mes_ano"] = meses_labels[0]
+    mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels, key="filtro_mes_ano")
     mes_selecionado = mes_map[mes_selecionado_label]
 
     df_mes = df[df["Mes"] == mes_selecionado]
@@ -531,7 +654,9 @@ try:
     if not datas_ordenadas:
         st.warning("Não foi possível montar o filtro de data para o mês selecionado.")
         st.stop()
-    data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas)
+    if "filtro_data" not in st.session_state or st.session_state["filtro_data"] not in datas_ordenadas:
+        st.session_state["filtro_data"] = datas_ordenadas[0]
+    data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas, key="filtro_data")
 
     df_f1 = df_mes[df_mes["Data_BR"] == data_selecionada]
     df_designados_f1 = df_designados_mes[df_designados_mes["Data_BR"] == data_selecionada]
@@ -568,6 +693,22 @@ try:
         or equipes_selecionadas
         or (not todos_status and status_selecionados)
     )
+
+    assinatura_filtros = (
+        mes_selecionado,
+        data_selecionada,
+        tuple(setores_selecionados),
+        tuple(equipes_selecionadas),
+        bool(todos_status),
+        tuple(status_selecionados),
+    )
+    assinatura_anterior = st.session_state.get("assinatura_filtros")
+    if assinatura_anterior is None:
+        st.session_state["assinatura_filtros"] = assinatura_filtros
+    elif assinatura_anterior != assinatura_filtros:
+        st.session_state["assinatura_filtros"] = assinatura_filtros
+        st.session_state["exibir_loading_filtros"] = True
+        st.rerun()
 
     df_filtrado = df_f3[df_f3[COL_STATUS].isin(status_selecionados)]
 
@@ -1005,6 +1146,27 @@ try:
         """
         mapa.get_root().html.add_child(Element(resumo_filtros_html))
 
+        icone_mapa_uri = _arquivo_para_data_uri(LOGO_ICON_PATH)
+        if icone_mapa_uri:
+            icone_mapa_html = f"""
+            <div style="
+                position: fixed;
+                bottom: 14px;
+                left: 12px;
+                z-index: 9998;
+                pointer-events: none;
+            ">
+                <img src="{icone_mapa_uri}" alt="Ícone do mapa" style="
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 9px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,.28);
+                    opacity: 0.95;
+                " />
+            </div>
+            """
+            mapa.get_root().html.add_child(Element(icone_mapa_html))
+
         mapa_html = mapa.get_root().render()
         components.html(mapa_html, height=650, scrolling=False)
 
@@ -1043,3 +1205,6 @@ except Exception as e:
     st.error(f"Erro interno ao processar os dados: {e}")
     with st.expander("Detalhes técnicos do erro"):
         st.exception(e)
+finally:
+    if loading_overlay_slot is not None:
+        loading_overlay_slot.empty()
