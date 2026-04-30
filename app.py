@@ -95,8 +95,8 @@ def _render_sidebar_icon(container):
         return
     container.markdown(
         f"""
-        <div style="display:flex; justify-content:center; margin:.15rem 0 .55rem 0;">
-            <img src="{icon_uri}" alt="Ícone" style="width:42px; height:42px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.25);" />
+        <div style="display:flex; justify-content:center; margin:-70px 0 0 0; pointer-events:none;">
+            <img src="{icon_uri}" alt="Ícone" style="width:100px; height:100px; border-radius:10px; pointer-events:none;" />
         </div>
         """,
         unsafe_allow_html=True,
@@ -118,12 +118,13 @@ def _render_icono_sidebar_recolhida():
             display: none;
             align-items: center;
             justify-content: center;
+            pointer-events: none;
         }}
         .rd-corner-icon img {{
-            width: 28px;
-            height: 28px;
+            width: 50px;
+            height: 50px;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,.25);
+            pointer-events: none;
         }}
         html:has(section[data-testid="stSidebar"][aria-expanded="false"]) .rd-corner-icon {{
             display: flex;
@@ -1149,21 +1150,35 @@ try:
         icone_mapa_uri = _arquivo_para_data_uri(LOGO_ICON_PATH)
         if icone_mapa_uri:
             icone_mapa_html = f"""
+           
             <div style="
                 position: fixed;
-                bottom: 14px;
-                left: 12px;
+                bottom: 2px;
+                left: 4px;
                 z-index: 9998;
-                pointer-events: none;
+                pointer-events: auto;
+                display: flex;
+                flex-direction: column;
+                align-items: left;
             ">
-                <img src="{icone_mapa_uri}" alt="Ícone do mapa" style="
-                    width: 34px;
-                    height: 34px;
-                    border-radius: 9px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,.28);
-                    opacity: 0.95;
-                " />
+                <a href="https://magoapp.streamlit.app" target="_blank" rel="noopener noreferrer">
+                    <img src="{icone_mapa_uri}" alt="Ícone do mapa" style="
+                        width: 80px;
+                        height: 80px;
+                        opacity: 0.50;
+                    " />
+                </a>
+                    <p style="
+                        margin: 0;
+                        padding: 0;
+                        font-size: 8px;
+                        line-height: 1;
+                        text-align: center;
+                        max-width: 500px;
+                    ">Monitoramento e Acompanhamento de Gestão Operacional</p>
             </div>
+          
+            
             """
             mapa.get_root().html.add_child(Element(icone_mapa_html))
 
