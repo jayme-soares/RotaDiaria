@@ -1,0 +1,15 @@
+name: streamlit-wakeup
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping_streamlit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simular Acesso e Ignorar Loop
+        # Usamos --max-redirs 5 para não estourar o limite e || true para não marcar como erro
+        run: |
+          curl -I -L --max-redirs 5 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+          https://magoapp.streamlit.app/ || true
