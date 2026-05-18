@@ -1251,7 +1251,21 @@ try:
     if not meses_disponiveis:
         st.warning("Não foi possível montar o filtro de mês. Verifique o formato das colunas de data.")
         st.stop()
-    meses_labels = [f"{m.split('-')[1]}/{m.split('-')[0]}" for m in meses_disponiveis]
+    nomes_meses = {
+        "01": "janeiro",
+        "02": "fevereiro",
+        "03": "março",
+        "04": "abril",
+        "05": "maio",
+        "06": "junho",
+        "07": "julho",
+        "08": "agosto",
+        "09": "setembro",
+        "10": "outubro",
+        "11": "novembro",
+        "12": "dezembro",
+    }
+    meses_labels = [f"{nomes_meses.get(m.split('-')[1], m.split('-')[1])}/{m.split('-')[0]}" for m in meses_disponiveis]
     mes_map = dict(zip(meses_labels, meses_disponiveis))
     if "filtro_mes_ano" not in st.session_state or st.session_state["filtro_mes_ano"] not in meses_labels:
         st.session_state["filtro_mes_ano"] = meses_labels[0]
@@ -1277,23 +1291,23 @@ try:
 
     st.sidebar.markdown("---")
 
-    setores_disponiveis = sorted(df_f1[COL_SETOR].dropna().unique().tolist())
-    todos_setores = st.sidebar.checkbox("Selecionar todos os Setores", value=False)
-    if todos_setores:
-        setores_selecionados = setores_disponiveis
-    else:
-        setores_selecionados = st.sidebar.multiselect("🏢 Setores ", setores_disponiveis)
-
-    df_f2 = df_f1[df_f1[COL_SETOR].isin(setores_selecionados)]
-
-    equipes_disponiveis = sorted(df_f2[COL_EQUIPE].dropna().unique().tolist())
+    equipes_disponiveis = sorted(df_f1[COL_EQUIPE].dropna().unique().tolist())
     todas_equipes = st.sidebar.checkbox("Selecionar todas as Equipes", value=False)
     if todas_equipes:
         equipes_selecionadas = equipes_disponiveis
     else:
         equipes_selecionadas = st.sidebar.multiselect("👷 Equipes", equipes_disponiveis)
 
-    df_f3 = df_f2[df_f2[COL_EQUIPE].isin(equipes_selecionadas)]
+    df_f2 = df_f1[df_f1[COL_EQUIPE].isin(equipes_selecionadas)]
+
+    setores_disponiveis = sorted(df_f2[COL_SETOR].dropna().unique().tolist())
+    todos_setores = st.sidebar.checkbox("Selecionar todos os Setores", value=False)
+    if todos_setores:
+        setores_selecionados = setores_disponiveis
+    else:
+        setores_selecionados = st.sidebar.multiselect("🏢 Setores ", setores_disponiveis)
+
+    df_f3 = df_f2[df_f2[COL_SETOR].isin(setores_selecionados)]
 
     status_disponiveis = sorted(df_f3[COL_STATUS].dropna().unique().tolist())
     todos_status = st.sidebar.checkbox("Selecionar todos os Status", value=True)
@@ -1311,8 +1325,8 @@ try:
     assinatura_filtros = (
         mes_selecionado,
         data_selecionada,
-        tuple(setores_selecionados),
         tuple(equipes_selecionadas),
+        tuple(setores_selecionados),
         bool(todos_status),
         tuple(status_selecionados),
     )
