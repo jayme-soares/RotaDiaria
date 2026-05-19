@@ -37,8 +37,147 @@ LOGO_ICON_PATH = os.path.join(LOGOS_DIR, "Icon.png")
 INTRO_WEBM_PATH = os.path.join(LOGOS_DIR, "intro.webm")
 INTRO_MP4_PATH = os.path.join(LOGOS_DIR, "intro.mp4")
 
+EQUIPES_CONTRATO_SOC = [
+    "NI201LRP-B",
+    "NI202LRP-B",
+    "NI203LRP-B",
+    "NI204LRP-B",
+    "NI205LRP-B",
+    "NI206LRP-B",
+    "NI207SRP-B",
+    "NI208LRP-B",
+    "NI209LRP-B",
+    "NI210SRP-B",
+    "NI211LRP-B",
+    "NI212LRP-B",
+    "NI213LRP-B",
+    "NI214LRP-B",
+    "NI215LRP-B",
+    "NI216LRP-B",
+    "NI217LRP-B",
+    "NI218LRP-B",
+    "NI219LLP-B",
+    "NI220LLP-B",
+    "NI221LLP-B",
+    "NI222LLP-B",
+    "NI223LLP-B",
+    "NI224LLP-B",
+    "NI225LLP-B",
+    "NI226SLP-B",
+    "NI201LFP-B",
+    "NI202LFP-B",
+    "NI203LFP-B",
+    "NI204LFP-B",
+    "NI201LLP-B",
+    "NI202LLP-B",
+    "NI203LLP-B",
+    "NI204LLP-B",
+    "NI201SLP-B",
+    "NI202SLP-B",
+    "NI203SLP-B",
+    "NI204SLP-B",
+    "NI205SLP-B",
+    "NI206SLP-B",
+    "NI207SLP-B",
+]
+
 SETORES_VALIDOS = ["SOC", "NEGOCIACAO"]
 SETORES_LABEL = {"SOC": "SOC", "NEGOCIACAO": "Negociação"}
+SETOR_LABELS_CANONICOS = {
+    "afericao": "Aferição",
+    "corte": "Corte",
+    "emergencia": "Emergência",
+    "novas": "Novas",
+    "prevenda": "Pre Venda",
+    "religa": "Religa",
+    "vistoria": "Vistoria",
+}
+MAPA_SETOR_POR_TIPO_OPERACAO = {
+    "adeinc07incidenciamtramal": "Emergência",
+    "aeconsumidorindividual": "Emergência",
+    "aeconsumidorprioritario": "Emergência",
+    "aeperigoiminente20": "Emergência",
+    "aeperigoiminente21": "Emergência",
+    "aeperigoiminente22": "Emergência",
+    "aeposteramalarred": "Emergência",
+    "aevitalacidvitima": "Emergência",
+    "ciclo10religacaoposteaerea": "Religa",
+    "ciclo11desligamentoapedidoretmedidoreramaldat": "Corte",
+    "ciclo11religacaopostedat": "Religa",
+    "ciclo12desligamentoligacaotemporariaaerea": "Novas",
+    "ciclo12religacaoinstalacaoderamalaerea": "Religa",
+    "ciclo13desligamentoligacaotemporariadat": "Novas",
+    "ciclo13religacaoinstalacaoderamaldat": "Religa",
+    "ciclo14religacaoleiturista": "Religa",
+    "ciclo15corteprioridade1medidor": "Corte",
+    "ciclo15religacaonegociadordigital": "Religa",
+    "ciclo16corteprioridade2medidor": "Corte",
+    "ciclo17corteprioridade3medidor": "Corte",
+    "ciclo1desligamentoapedidoretmedidoreramalaerea": "Corte",
+    "ciclo21recortedat": "Corte",
+    "ciclo22corteprioridade1posteaerea": "Corte",
+    "ciclo22recortemedidor": "Corte",
+    "ciclo23corteprioridade2posteaerea": "Corte",
+    "ciclo24corteprioridade3posteaerea": "Corte",
+    "ciclo29corteprioridade1postedat": "Corte",
+    "ciclo2recorteaerea": "Corte",
+    "ciclo30corteprioridade2postedat": "Corte",
+    "ciclo31cortemassivoposteaerea": "Corte",
+    "ciclo32cortemassivopostedat": "Corte",
+    "ciclo32lignovamonofasicaemredeconvencionalvendadepdram01nc31": "Novas",
+    "ciclo33cortemassivoretramalaerea": "Corte",
+    "ciclo36corteprioridade1retiradaderamalaerea": "Corte",
+    "ciclo36lignovamonofasicaemredenaoconvencionalvendadepdram02nc31": "Novas",
+    "ciclo37corteprioridade2retiradaderamalaerea": "Corte",
+    "ciclo38corteprioridade3retiradaderamalaerea": "Corte",
+    "ciclo38lignovapolifasicaemredeconvencionalvendadepdram01nc31": "Novas",
+    "ciclo3cortemassivomedidor": "Corte",
+    "ciclo40lignovapolifasicaemredenaoconvencionalvendadepdram02nc36": "Novas",
+    "ciclo42lignovapolifasicaemredenaoconvencionalvendadepdram02nc31": "Novas",
+    "ciclo43corteprioridade1retiradaderamaldat": "Corte",
+    "ciclo44corteprioridade2retiradaderamaldat": "Corte",
+    "ciclo45conexaodenovasligacoes": "Novas",
+    "ciclo46acrescimodecargaemredeconvencionalsemvendadepdram01nc32": "Novas",
+    "ciclo48acrescimodecargaemredeconvencionalsemvendadepdram01nc37": "Novas",
+    "ciclo48acrescimodecargaemredenaoconvencionalsemvendadepdr": "Novas",
+    "ciclo50acrescimodecargaemredenaoconvencsemvendadepdram02nc32": "Novas",
+    "ciclo51corteprioridade1sentinelami": "Corte",
+    "ciclo51fiscalizacaodat": "Corte",
+    "ciclo52corteprioridade2sentinelami": "Corte",
+    "ciclo53corteprioridade3sentinelami": "Corte",
+    "ciclo53decrescimodecargaemredeconvencionalam01nc32": "Novas",
+    "ciclo54decrescimodecargaemredeconvencionalam01nc37": "Novas",
+    "ciclo55decrescimodecargaemredenaoconvencionalam02nc32": "Novas",
+    "ciclo57mmlerpmmonofasicoemredeconvencsemvendadepadraoam01nc33": "Novas",
+    "ciclo59mmlerpmmonofemredenaoconvencsemvendadepadraoam02nc38": "Novas",
+    "ciclo5fiscalizacao": "Corte",
+    "ciclo61mmlerpmmonofemredenaoconvencsemvendadepadraoam02nc33": "Novas",
+    "ciclo61semcontratodat": "Corte",
+    "ciclo63mmlerppolifasicoemredeconvencsemvendadepadraoam01nc33": "Novas",
+    "ciclo65mmlerppolifasicoemredeconvencsemvendadepadraoam01nc38": "Novas",
+    "ciclo67mmlerppolifasemredenaoconvencsemvendadepadraoam02nc33": "Novas",
+    "ciclo68rrlesremredeconvencionalam01nc33": "Novas",
+    "ciclo69rrlesremredenaoconvencionalam02nc38": "Novas",
+    "ciclo6semcontrato": "Corte",
+    "ciclo71exteriorizacaodemedidoremredeconvencionalam01nc33": "Novas",
+    "ciclo72exteriorizacaodemedidoremredenaoconvencionalam02nc33": "Novas",
+    "ciclo73geracaodistribuidaemredeconvencionalam01nc35": "Novas",
+    "ciclo74geracaodistribuidaemredenaoconvencionalam02nc35": "Novas",
+    "ciclo75instalacaoedesinstalacaodeprovisoriaemredeconvecam01nc13": "Novas",
+    "ciclo78vistoriademedidoremredeconvencionalam01nc12": "Novas",
+    "ciclo79vistoriademedidoremredenaoconvencionalam02nc14": "Novas",
+    "ciclo80afericaodemedidoremredeconvencionalam03nc12": "Aferição",
+    "ciclo81afericaodemedidoremredenaoconvencionalam04nc14": "Aferição",
+    "ciclo82substituicaodemedidoremredeconvencionalam01nc35": "Novas",
+    "ciclo83substituicaodemedidoremredenaoconvencionalam02nc35": "Novas",
+    "ciclo84reclamacaodeservicodeligacaonovaam01nc33": "Novas",
+    "ciclo87geracaodistribuidaemredeconvencionalvistoria": "Pre Venda",
+    "ciclo89servicosdevistoriadaln": "Pre Venda",
+    "ciclo90rpemml": "Pre Venda",
+    "ciclo92servicosdecobrancaeinadimplencia": "Vistoria",
+    "ciclo9religacaomedidor": "Religa",
+    "opescr0171inspecaocaminhaoretiradaderamal": "Corte",
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -948,6 +1087,26 @@ def _normalizar_nome_coluna(nome):
     return "".join(ch for ch in texto if ch.isalnum())
 
 
+def _normalizar_label_setor(valor):
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip()
+    return SETOR_LABELS_CANONICOS.get(_normalizar_nome_coluna(texto), texto)
+
+
+def _mapear_setor_por_tipo_operacao(df_execucao, col_tipo_operacao):
+    if col_tipo_operacao not in df_execucao.columns:
+        return pd.Series("", index=df_execucao.index, dtype="object")
+    chaves_tipo = df_execucao[col_tipo_operacao].apply(_normalizar_nome_coluna)
+    setor_mapeado = chaves_tipo.map(MAPA_SETOR_POR_TIPO_OPERACAO)
+    setor_origem = df_execucao[col_tipo_operacao].fillna("").astype(str).str.strip()
+    setor_final = setor_mapeado.where(
+        setor_mapeado.notna() & setor_mapeado.astype(str).str.strip().ne(""),
+        setor_origem
+    )
+    return setor_final.apply(_normalizar_label_setor)
+
+
 def _selecionar_coluna(df, aliases):
     colunas_norm = {_normalizar_nome_coluna(c): c for c in df.columns}
     for alias in aliases:
@@ -1035,6 +1194,12 @@ def _normalizar_texto_filtro(valor):
     mapa = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
     texto = texto.translate(mapa)
     return "".join(ch for ch in texto if ch.isalnum())
+
+EQUIPES_CONTRATO_SOC_MAP = {
+    _normalizar_texto_filtro(equipe): equipe
+    for equipe in EQUIPES_CONTRATO_SOC
+    if str(equipe).strip()
+}
 
 def _normalizar_chave_codigo(valor):
     if pd.isna(valor):
@@ -1192,7 +1357,11 @@ try:
     COL_HORA_FIM = _selecionar_coluna(df, ["Data Fim", "Data Final"]) or COL_DATA
     COL_STATUS = _selecionar_coluna(df, ["Estado TdC", "Estado", "Resultado"]) or "Resultado"
     COL_RETORNO = _selecionar_coluna(df, ["Resultado", "Retorno"]) or COL_STATUS
-    COL_SETOR = "Tipo TdC"
+    COL_SETOR_ORIGEM = _selecionar_coluna(
+        df,
+        ["Tipo Operação", "Tipo Operacao", "Tipo TdC", "Tipo Serviço", "Setor"]
+    ) or "Tipo TdC"
+    COL_SETOR = "Setor"
     COL_TRAMITE = _selecionar_coluna(df, ["Tramite", "Trâmite"]) or "Tramite"
     COL_CAUSA = _selecionar_coluna(df, ["Causa/Descritivo Resultado", "Causa", "Descritivo"]) or "Causa/Descritivo Resultado"
     COL_D_ID = 'Código TdC'
@@ -1204,6 +1373,11 @@ try:
     COL_D_ENDERECO = 'Endereço'
     COL_D_LAT = 'Latitude'
     COL_D_LON = 'Longitude'
+
+    if COL_SETOR_ORIGEM in df.columns:
+        df[COL_SETOR] = _mapear_setor_por_tipo_operacao(df, COL_SETOR_ORIGEM)
+    elif COL_SETOR in df.columns:
+        df[COL_SETOR] = df[COL_SETOR].apply(_normalizar_label_setor)
 
     cols_criticas = [COL_ID, COL_EQUIPE, COL_LAT, COL_LON, COL_DATA, COL_SETOR, COL_STATUS, COL_RETORNO]
     faltantes = [c for c in cols_criticas if c not in df.columns]
@@ -1292,6 +1466,20 @@ try:
     st.sidebar.markdown("---")
 
     equipes_disponiveis = sorted(df_f1[COL_EQUIPE].dropna().unique().tolist())
+    equipes_contrato_map = EQUIPES_CONTRATO_SOC_MAP
+    if equipes_contrato_map:
+        equipes_norm = set(equipes_contrato_map.keys())
+        equipes_filtradas = []
+        for equipe in equipes_disponiveis:
+            equipe_norm = _normalizar_texto_filtro(equipe)
+            if not equipe_norm:
+                continue
+            if any(
+                equipe_norm == alvo or equipe_norm.startswith(alvo) or alvo.startswith(equipe_norm)
+                for alvo in equipes_norm
+            ):
+                equipes_filtradas.append(equipe)
+        equipes_disponiveis = equipes_filtradas
     todas_equipes = st.sidebar.checkbox("Selecionar todas as Equipes", value=False)
     if todas_equipes:
         equipes_selecionadas = equipes_disponiveis
