@@ -611,6 +611,18 @@ def _supabase_admin_users():
     return {u.get("id"): u for u in users if u.get("id")}
 
 
+@st.cache_data(show_spinner=False)
+def _carregar_admin_usuarios(refresh_token):
+    profiles = _supabase_list_profiles()
+    auth_users = _supabase_admin_users()
+    return profiles, auth_users
+
+
+@st.cache_data(show_spinner=False)
+def _carregar_admin_logs(refresh_token, limit=300):
+    return _supabase_list_login_events(limit=limit)
+
+
 def _supabase_signout(access_token):
     if not access_token:
         return
@@ -752,12 +764,21 @@ def _logout(reason="manual"):
 
 
 def _render_admin_painel():
+    if "admin_refresh_token" not in st.session_state:
+        st.session_state["admin_refresh_token"] = 0
+
+    top_cols = st.columns([1, 0.08])
+    with top_cols[1]:
+        if st.button("🔄", key="admin_refresh", help="Atualizar dados"):
+            st.session_state["admin_refresh_token"] = time.time()
+
+    refresh_token = st.session_state.get("admin_refresh_token", 0)
+
     st.subheader("Administração de usuários")
     st.caption("Aprove cadastros e ajuste função/setores a qualquer momento.")
 
     try:
-        profiles = _supabase_list_profiles()
-        auth_users = _supabase_admin_users()
+        profiles, auth_users = _carregar_admin_usuarios(refresh_token)
     except Exception as e:
         st.error(_formatar_erro(e))
         return
@@ -840,6 +861,7 @@ def _render_admin_painel():
                         "allowed_sectors": _setores_para_storage(novos_setores),
                     })
                     st.success("Usuário atualizado.")
+                    st.session_state["admin_refresh_token"] = time.time()
                     st.rerun()
                 except Exception as e:
                     st.error(_formatar_erro(e))
@@ -847,7 +869,7 @@ def _render_admin_painel():
     st.markdown("---")
     st.subheader("Logs de acesso")
     try:
-        eventos = _supabase_list_login_events(limit=300)
+        eventos = _carregar_admin_logs(refresh_token, limit=300)
     except Exception as e:
         st.error(_formatar_erro(e))
         return
