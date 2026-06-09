@@ -25,6 +25,7 @@ st.set_page_config(
 )
 
 DB_PATH = r"C:\Users\CENEGED\Documents\BI_SOC\Bases de dados\soc-marica.db"
+DB_NEGOCIADOR_PATH = r"C:\Users\CENEGED\Documents\Negociador\base_neg\soc-negociacao.db"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TRAMITES_PATH = os.path.join(SCRIPT_DIR, "Tramites.xlsx")
 LOGOS_DIR = os.path.join(SCRIPT_DIR, "src", "logos")
@@ -991,34 +992,10 @@ _render_icono_sidebar_recolhida()
 auth_user = st.session_state.get("auth_user", {})
 auth_user = auth_user if isinstance(auth_user, dict) else {}
 
-idle_timeout_min = int(st.secrets.get("auth_idle_timeout_minutes", 30))
-idle_timeout_sec = max(60, idle_timeout_min * 60)
-heartbeat_sec = int(st.secrets.get("auth_heartbeat_seconds", 30))
-heartbeat_sec = min(max(heartbeat_sec, 10), 300)
-
-tick = st_autorefresh(interval=heartbeat_sec * 1000, key="auth_session_heartbeat")
-last_tick = st.session_state.get("_last_heartbeat_tick")
-is_heartbeat = last_tick is not None and tick != last_tick
-st.session_state["_last_heartbeat_tick"] = tick
-
-agora = int(time.time())
-if "session_started_at" not in st.session_state:
-    st.session_state["session_started_at"] = agora
-if "last_activity_at" not in st.session_state:
-    st.session_state["last_activity_at"] = agora
-
-if not is_heartbeat:
-    st.session_state["last_activity_at"] = agora
-
-tempo_logado_seg = max(0, agora - int(st.session_state.get("session_started_at", agora)))
-tempo_inativo_seg = max(0, agora - int(st.session_state.get("last_activity_at", agora)))
-if tempo_inativo_seg >= idle_timeout_sec:
-    _logout("inactivity")
-
 st.sidebar.caption(f"Usuário: {auth_user.get('full_name', '')}")
 st.sidebar.caption(f"Perfil: {auth_user.get('role', 'user').upper()}")
 with st.sidebar:
-    _render_tempo_logado_realtime(st.session_state.get("session_started_at", agora))
+    _render_tempo_logado_realtime(st.session_state.get("session_started_at", int(time.time())))
 
 
 
@@ -1040,12 +1017,39 @@ if auth_user.get("role") == "admin":
     area_options.append("Administração")
 area_escolhida = st.sidebar.radio("Área", area_options, index=0)
 
+idle_timeout_min = int(st.secrets.get("auth_idle_timeout_minutes", 30))
+idle_timeout_sec = max(60, idle_timeout_min * 60)
+heartbeat_sec = int(st.secrets.get("auth_heartbeat_seconds", 30))
+heartbeat_sec = min(max(heartbeat_sec, 10), 300)
+
+usar_heartbeat = area_escolhida == "Administração"
+last_tick = st.session_state.get("_last_heartbeat_tick")
+tick = last_tick if last_tick is not None else 0
+if usar_heartbeat:
+    tick = st_autorefresh(interval=heartbeat_sec * 1000, key="auth_session_heartbeat")
+is_heartbeat = usar_heartbeat and last_tick is not None and tick != last_tick
+st.session_state["_last_heartbeat_tick"] = tick
+
+agora = int(time.time())
+if "session_started_at" not in st.session_state:
+    st.session_state["session_started_at"] = agora
+if "last_activity_at" not in st.session_state:
+    st.session_state["last_activity_at"] = agora
+
+if not is_heartbeat:
+    st.session_state["last_activity_at"] = agora
+
+tempo_logado_seg = max(0, agora - int(st.session_state.get("session_started_at", agora)))
+tempo_inativo_seg = max(0, agora - int(st.session_state.get("last_activity_at", agora)))
+if tempo_inativo_seg >= idle_timeout_sec:
+    _logout("inactivity")
+
 if st.sidebar.button("Sair"):
     _logout("manual")
 
 
-def _carregar_local():
-    """Fallback: lê do SQLite local (apenas para desenvolvimento)."""
+def _carregar_local_soc():
+    """Fallback: lê do SQLite local (SOC, apenas para desenvolvimento)."""
     conn = sqlite3.connect(DB_PATH)
     df_full = pd.read_sql_query("SELECT * FROM base_producao", conn)
     conn.close()
@@ -1061,10 +1065,82 @@ def _carregar_local():
         ["Endereço", "Endereco", "Logradouro", "Endereço da atividade", "Endereco da atividade", "Endereço do cliente", "Endereco do cliente"]
     ) or _selecionar_coluna_fuzzy(df_full, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_full, inclui=["logradouro"])
     df["Endereço"] = df_full[col_endereco] if col_endereco else ""
+    col_municipio = _selecionar_coluna(
+        df_full,
+        ["Município", "Municipio", "Cidade", "Cidade/Município", "Cidade/Municipio"]
+    ) or _selecionar_coluna_fuzzy(df_full, inclui=["municip"]) or _selecionar_coluna_fuzzy(df_full, inclui=["cidade"])
+    df["Município"] = df_full[col_municipio] if col_municipio else ""
     return df
 
 
-def _carregar_gsheet():
+def _montar_df_execucao_local(df_full):
+    col_id = _selecionar_coluna(df_full, ["Código TdC", "codigo_tdc", "codigo tdc"]) or _selecionar_coluna_fuzzy(df_full, inclui=["codigo", "tdc"])
+    col_equipe = _selecionar_coluna(df_full, ["Equipe", "Equipe_x", "Recurso"]) or _selecionar_coluna_fuzzy(df_full, inclui=["equipe"])
+    col_lat = _selecionar_coluna(df_full, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_full, inclui=["lat"])
+    col_lon = _selecionar_coluna(df_full, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(df_full, inclui=["lon"]) or _selecionar_coluna_fuzzy(df_full, inclui=["long"])
+    col_data_ini = _selecionar_coluna(df_full, ["Data Início", "Data Inicio", "Data"]) or _selecionar_coluna_fuzzy(df_full, inclui=["data"])
+    col_data_fim = _selecionar_coluna(df_full, ["Data Fim", "Data Final"]) or _selecionar_coluna_fuzzy(df_full, inclui=["data", "fim"])
+    col_estado = _selecionar_coluna(df_full, ["Estado TdC", "Estado", "Resultado"]) or _selecionar_coluna_fuzzy(df_full, inclui=["estado"])
+    col_resultado = _selecionar_coluna(df_full, ["Resultado", "Retorno"]) or _selecionar_coluna_fuzzy(df_full, inclui=["resultado"])
+    col_tipo = _selecionar_coluna(df_full, ["Tipo TdC", "Tipo Serviço", "Tipo Servico", "Setor"]) or _selecionar_coluna_fuzzy(df_full, inclui=["tipo"])
+    col_causa = _selecionar_coluna(df_full, ["Causa/Descritivo Resultado", "Causa", "Descritivo"]) or _selecionar_coluna_fuzzy(df_full, inclui=["causa"]) or _selecionar_coluna_fuzzy(df_full, inclui=["descritivo"])
+    col_ciclo = _selecionar_coluna(df_full, ["Ciclo de trabalho", "Ciclo Trabalho"]) or _selecionar_coluna_fuzzy(df_full, inclui=["ciclo"])
+    col_endereco = _selecionar_coluna(
+        df_full,
+        ["Endereço", "Endereco", "Logradouro", "Endereço da atividade", "Endereco da atividade", "Endereço do cliente", "Endereco do cliente"]
+    ) or _selecionar_coluna_fuzzy(df_full, inclui=["endere"]) or _selecionar_coluna_fuzzy(df_full, inclui=["logradouro"])
+    col_municipio = _selecionar_coluna(
+        df_full,
+        ["Município", "Municipio", "Cidade", "Cidade/Município", "Cidade/Municipio"]
+    ) or _selecionar_coluna_fuzzy(df_full, inclui=["municip"]) or _selecionar_coluna_fuzzy(df_full, inclui=["cidade"])
+    col_co = _selecionar_coluna(
+        df_full,
+        ["CO", "C.O", "C O", "Centro Operativo", "CentroOperativo", "Centro Operacional", "CentroOperacional"]
+    ) or _selecionar_coluna_fuzzy(df_full, inclui=["centro", "operativo"]) or _selecionar_coluna_fuzzy(df_full, inclui=["centro", "operacional"])
+
+    df = pd.DataFrame(index=df_full.index)
+    df["Código TdC"] = df_full[col_id] if col_id else ""
+    df["Equipe"] = df_full[col_equipe] if col_equipe else ""
+    df["Latitude"] = df_full[col_lat] if col_lat else ""
+    df["Longitude"] = df_full[col_lon] if col_lon else ""
+    df["Data Início"] = df_full[col_data_ini] if col_data_ini else ""
+    df["Data Fim"] = df_full[col_data_fim] if col_data_fim else ""
+    df["Estado TdC"] = df_full[col_estado] if col_estado else ""
+    df["Resultado"] = df_full[col_resultado] if col_resultado else ""
+    df["Tipo TdC"] = df_full[col_tipo] if col_tipo else ""
+    df["Causa/Descritivo Resultado"] = df_full[col_causa] if col_causa else ""
+    df["Ciclo de trabalho"] = df_full[col_ciclo] if col_ciclo else ""
+    df["Endereço"] = df_full[col_endereco] if col_endereco else ""
+    df["Município"] = df_full[col_municipio] if col_municipio else ""
+    df["CO"] = df_full[col_co] if col_co else ""
+    return df
+
+
+def _carregar_local_negociacao():
+    """Fallback: lê do SQLite local (Negociação, apenas para desenvolvimento)."""
+    conn = sqlite3.connect(DB_NEGOCIADOR_PATH)
+    df_full = pd.read_sql_query("SELECT * FROM base_producao_neg", conn)
+    conn.close()
+    return _montar_df_execucao_local(df_full)
+
+
+def _carregar_local(setor_ativo):
+    """Fallback: lê do SQLite local (apenas para desenvolvimento)."""
+    setor_norm = _normalizar_setor_ativo(setor_ativo)
+    if setor_norm == "NEGOCIACAO":
+        return _carregar_local_negociacao()
+    return _carregar_local_soc()
+
+
+def _deve_usar_gsheet(setor_ativo):
+    if "gsheet_id" not in st.secrets or "gsheet_credentials" not in st.secrets:
+        return False
+    setor_norm = _normalizar_setor_ativo(setor_ativo)
+    db_path = DB_NEGOCIADOR_PATH if setor_norm == "NEGOCIACAO" else DB_PATH
+    return not os.path.exists(db_path)
+
+
+def _carregar_gsheet(setor_ativo):
     """Lê dados das abas do Google Sheets (produção no Cloud)."""
     import gspread
     from google.oauth2.service_account import Credentials
@@ -1078,6 +1154,16 @@ def _carregar_gsheet():
         rows_ajustadas = [r[:width] + [""] * max(0, width - len(r)) for r in rows]
         return pd.DataFrame(rows_ajustadas, columns=headers)
 
+    def _obter_worksheet(worksheets, nome_alvo):
+        ws = worksheets.get(nome_alvo)
+        if ws is not None:
+            return ws
+        alvo_norm = _normalizar_nome_coluna(nome_alvo)
+        for titulo, ws_item in worksheets.items():
+            if _normalizar_nome_coluna(titulo) == alvo_norm:
+                return ws_item
+        return None
+
     creds_raw = st.secrets["gsheet_credentials"]
     creds = Credentials.from_service_account_info(
         creds_raw,
@@ -1087,8 +1173,14 @@ def _carregar_gsheet():
     spreadsheet = client.open_by_key(st.secrets["gsheet_id"])
 
     worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
-    dados_values = worksheets["dados"].get_all_values() if "dados" in worksheets else []
-    coordenadas_values = worksheets["coordenadas"].get_all_values() if "coordenadas" in worksheets else []
+    aba_execucao = _aba_execucao_por_setor(setor_ativo)
+    ws_execucao = _obter_worksheet(worksheets, aba_execucao)
+    if ws_execucao is None:
+        raise RuntimeError(f"A aba '{aba_execucao}' não foi encontrada na planilha.")
+    ws_coordenadas = _obter_worksheet(worksheets, "coordenadas")
+
+    dados_values = ws_execucao.get_all_values()
+    coordenadas_values = ws_coordenadas.get_all_values() if ws_coordenadas is not None else []
 
     df_dados = _valores_para_df(dados_values)
     df_coordenadas = _padronizar_coordenadas(_valores_para_df(coordenadas_values))
@@ -1107,6 +1199,17 @@ def _normalizar_nome_coluna(nome):
     mapa = str.maketrans("áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc")
     texto = texto.translate(mapa)
     return "".join(ch for ch in texto if ch.isalnum())
+
+
+def _normalizar_setor_ativo(valor):
+    if valor is None:
+        return ""
+    return str(valor).strip().upper()
+
+
+def _aba_execucao_por_setor(setor_ativo):
+    setor_norm = _normalizar_setor_ativo(setor_ativo)
+    return "dados_negociador" if setor_norm == "NEGOCIACAO" else "dados"
 
 
 def _normalizar_label_setor(valor):
@@ -1217,6 +1320,200 @@ def _normalizar_texto_filtro(valor):
     texto = texto.translate(mapa)
     return "".join(ch for ch in texto if ch.isalnum())
 
+
+def _extrair_label_co(valor):
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip()
+    if not texto:
+        return ""
+    if "(" in texto:
+        texto = texto.split("(", 1)[0].strip()
+    for sep in (" - ", " – ", " — "):
+        if sep in texto:
+            texto = texto.split(sep, 1)[1].strip()
+            break
+    return texto
+
+
+EQUIPES_NOME_MAPA = {
+    'albertomendoncacarlos': 'CARLOS ALBERTO MENDONÇA',
+    'albertosoaresdesouzafilhocarlos': 'CARLOS ALBERTO SOARES DE SOUZA FILHO',
+    'albinorodriguesgemerson': 'GEMERSON ALBINO RODRIGUES',
+    'alesonaleson': 'ALESON FERREIRA',
+    'alessandrorosafonseca': 'FONSECA ALESSANDRO ROSA',
+    'alexiscardoso': 'ALEXIS CARDOSO',
+    'alinesiqueira': 'ALINE SIQUEIRA',
+    'alvarengabarretoflauviano': 'FLAUVIANO ALVARENGA BARRETO',
+    'balbinocorreasilvamarcelo': 'MARCELO BALBINO CORREA SILVA',
+    'baltargabriel': 'BALTAR GABRIEL',
+    'barbosadelimarodolfo': 'RODOLFO BARBOSA DE LIMA',
+    'barcelosdasilvanogueirachaid': 'CHAID BARCELOS DA SILVA NOGUEIRA',
+    'bastosbarcelosdaniel': 'DANIEL BASTOS BARCELOS',
+    'brandaocostaalexandre': 'COSTA ALEXANDRE BRANDÃO',
+    'brazieldasilvarafael': 'RAFAEL BRAZIEL DA SILVA',
+    'brunomalfertheiner': 'BRUNO CIDADE',
+    'cabraldaconceicaojoaopedro': 'PEDRO CABRAL DA CONCEICAO JOÃO',
+    'cardosotavaresdasilvaroberta': 'ROBERTA CARDOSO TAVARES DA SILVA',
+    'ciancioraffaele': 'CIANCIO RAFFAELE',
+    'coelhoacariodanilo': 'DANILO COELHO ACARIO',
+    'correadossantosbarbosaramon': 'RAMON CORREA DOS SANTOS BARBOSA',
+    'cristianosouzanuneslucas': 'LUCAS CRISTIANO SOUZA NUNES',
+    'daconceicaosilveiraslucas': 'LUCAS DA CONCEIÇÃO SILVEIRAS',
+    'danilopeixoto': 'DANILO PEIXOTO',
+    'dasilvabarretojunioralcindo': 'ALCINDO DA SILVA BARRETO JUNIOR',
+    'dasilvacamarafilhomarcelo': 'MARCELO DA SILVA CAMARA FILHO',
+    'dasilvadesouzarufinopatrick': 'PATRICK DA SILVA DE SOUZA RUFINO',
+    'dasilvadossantosalexandre': 'ALEXANDRE DA SILVA DOS SANTOS',
+    'dasilvarodriguesdasilvacostawellington': 'WELLINGTON DA SILVA RODRIGUES DA SILVA COSTA',
+    'dasilvasouzalucas': 'LUCAS DA SILVA SOUZA',
+    'dasilvathomazjuniorronivaldo': 'RONIVALDO DA SILVA THOMAZ JÚNIOR',
+    'defreitasmartinslucas': 'LUCAS DE FREITAS MARTINS',
+    'delemosmartinsdasilvajefersonluiz': 'LUIZ DE LEMOS MARTINS DA SILVA JEFERSON',
+    'desouzamonteirodafrancathiago': 'THIAGO DE SOUZA MONTEIRO DA FRANCA',
+    'desouzaribeiromatheus': 'MATHEUS DE SOUZA RIBEIRO',
+    'docarmosilvaeliandro': 'ELIANDRO DO CARMO SILVA',
+    'dossantosalcantaragabriel': 'GABRIEL DOS SANTOS ALCANTARA',
+    'dossantosjuniorexodo': 'EXODO DOS SANTOS JUNIOR',
+    'dossantosoliveirajosias': 'JOSIAS DOS SANTOS OLIVEIRA',
+    'dossantosvaladareswanderson': 'WANDERSON DOS SANTOS VALADARES',
+    'eduardocoelho': 'EDUARDO COELHO',
+    'eliasmouracarneirodacunharoberto': 'ROBERTO ELIAS MOURA CARNEIRO DA CUNHA',
+    'elivamdocarmosilva': 'SILVA ELIVAM DO CARMO',
+    'emanuelsilva': 'EMANUEL DA SILVA CASAMASSO',
+    'evandrocarvalho': 'EVANDRO CARVALHO',
+    'fabianosilva': 'FABIANO SILVA',
+    'fariadossantosgabriel': 'GABRIEL FARIA DOS SANTOS',
+    'felixmessias': 'MESSIAS FELIX',
+    'fernandesmottaalexandre': 'ALEXANDRE FERNANDES MOTTA',
+    'fernandovitoralvesluiz': 'LUIZ FERNANDO VITOR ALVES',
+    'ferreiradasilvaanderson': 'ANDERSON FERREIRA DA SILVA',
+    'fiuzacoelhonetojair': 'JAIR FIUZA COELHO NETO',
+    'freirebragabarbudodearaujoyuri': 'YURI FREIRE BRAGA BARBUDO DE ARAUJO',
+    'gabrielteixeiradealmeidarosareylson': 'REYLSON GABRIEL TEIXEIRA DE ALMEIDA ROSA',
+    'geovanevenancio': 'GEOVANE VENANCIO',
+    'glaudersoncampos': 'GLAUDERSON CAMPOS',
+    'gomesdacostawillian': 'WILLIAN GOMES DA COSTA',
+    'gomesdebritomarcelo': 'MARCELO GOMES DE BRITO',
+    'gomesdejesusaraujobruna': 'BRUNA GOMES DE JESUS ARAUJO',
+    'gomeslessaeverson': 'EVERSON GOMES LESSA',
+    'gomesoliveiraluan': 'LUAN GOMES OLIVEIRA',
+    'gomessouzakaique': 'KAIQUE GOMES SOUZA',
+    'gouveaamorimrychard': 'RYCHARD GOUVEA AMORIM',
+    'guimaraessalesrobson': 'ROBSON GUIMARAES SALES',
+    'heliodesouza': 'SOUZA HÉLIO DE',
+    'henriquecorreadiasromulo': 'ROMULO HENRIQUE CORRÊA DIAS',
+    'higorfelixrangel': 'RANGEL HIGOR FELIX',
+    'hipolitodacostaflavio': 'FLAVIO HIPOLITO DA COSTA',
+    'iarasantos': 'IARA SANTOS',
+    'jeffersonassis': 'JEFFERSON ASSIS',
+    'jhonatanmanhaes': 'JHONATAN MANHAES',
+    'joaosilva': 'JOAO SILVA',
+    'jonassoares': 'JONAS SOARES',
+    'josenunesrodriguesjuniorfrancisco': 'FRANCISCO JOSE NUNES RODRIGUES JUNIOR',
+    'junqueiratrindadedeivid': 'DEIVID JUNQUEIRA TRINDADE',
+    'lopesdasilvayure': 'YURE LOPES DA SILVA',
+    'lucasneto': 'LUCAS NETO',
+    'lucaspaixao': 'LUCAS PAIXAO',
+    'lucassilva': 'LUCAS SILVA',
+    'luizandrade': 'LUIZ ANDRADE',
+    'luizfontesbarbedoandre': 'ANDRE LUIZ FONTES BARBEDO',
+    'luizpintobarretoandre': 'ANDRE LUIZ PINTO BARRETO',
+    'marcelodesouza': 'SOUZA MARCELO DE',
+    'marcelomoreira': 'MARCELO MOREIRA',
+    'marcussilva': 'MARCUS SILVA',
+    'matheusviana': 'MATHEUS VIANA',
+    'mattheusveiga': 'MATTHEUS VEIGA',
+    'mellosantannavinicius': 'VINICIUS MELLO SANT ANNA',
+    'mesquitalucianojorge': 'JORGE MESQUITA LUCIANO',
+    'michaelsantana': 'MICHAEL SANTANA',
+    'moreirapaulamurilo': 'MURILO MOREIRA PAULA',
+    'moreirasantosbruno': 'BRUNO MOREIRA SANTOS',
+    'mullerjeronimo': 'MULLER JERONIMO',
+    'muriloneto': 'MURILO NETO',
+    'nepomucenopericlesnicollas': 'NICOLLAS NEPOMUCENO PERICLES',
+    'nerysousakaven': 'KAVEN NERY SOUSA',
+    'nogueiradorosariosabino': 'SABINO NOGUEIRA DO ROSARIO',
+    'otaviodesouza': 'SOUZA OTAVIO DE',
+    'paixaodesouzadaconceicaowellington': 'WELLINGTON PAIXÃO DE SOUZA DA CONCEIÇÃO',
+    'patricktexeira': 'PATRICK TEXEIRA',
+    'paulosantana': 'PAULO SANTANA',
+    'pecanhadasilvahattila': 'HATTILA PEÇANHA DA SILVA',
+    'pecanhavazandre': 'ANDRE PECANHA VAZ',
+    'pedrogoncalvessenralucas': 'LUCAS PEDRO GONCALVES SENRA',
+    'pedrosadealencarfilipe': 'FILIPE PEDROSA DE ALENCAR',
+    'pedrosantos': 'SANTOS PEDRO',
+    'pedrosilva': 'PEDRO SILVA',
+    'pereiradeoliveiraallan': 'ALLAN PEREIRA DE OLIVEIRA',
+    'pereiraflorthalis': 'THALIS PEREIRA FLOR',
+    'pereiragoncalvesvitor': 'VITOR PEREIRA GONÇALVES',
+    'petragliaalexandremarcio': 'MARCIO PETRAGLIA ALEXANDRE',
+    'piedadedesouzasilvaanderson': 'ANDERSON PIEDADE DE SOUZA SILVA',
+    'pimentelnunessergio': 'SERGIO PIMENTEL NUNES',
+    'pinheiroconradoalexsandro': 'ALEXSANDRO PINHEIRO CONRADO',
+    'pinheiroviannarodriguesjeckson': 'JECKSON PINHEIRO VIANNA RODRIGUES',
+    'piresalvesalan': 'ALAN PIRES ALVES',
+    'rafaelsantos': 'RAFAEL SANTOS',
+    'ralphcosta': 'RALPH COSTA',
+    'rangelfideliswallace': 'WALLACE RANGEL FIDELIS',
+    'refersontoledo': 'REFERSON TOLEDO',
+    'robertoconceicao': 'ROBERTO CONCEIÇÃO',
+    'rodrigofelixantunescaio': 'CAIO RODRIGO FELIX ANTUNES',
+    'rogeriodesouza': 'ROGERIO FREITAS DE SOUZA',
+    'romulofernandes': 'ROMULO FERNANDES',
+    'rondinelisilva': 'RONDINELI SILVA',
+    'rosarodriguesdouglas': 'DOUGLAS ROSA RODRIGUES',
+    'santosfernandesronald': 'RONALD SANTOS FERNANDES',
+    'silvabragaalessandrina': 'ALESSANDRINA SILVA BRAGA',
+    'silvafariasalex': 'ALEX SILVA FARIAS',
+    'soaresdasilvaazediasrenan': 'RENAN SOARES DA SILVA AZEDIAS',
+    'souzadossantosrafael': 'RAFAEL SOUZA DOS SANTOS',
+    'souzarangelgabriel': 'GABRIEL SOUZA RANGEL',
+    'souzasoaresdiogenes': 'DIOGENES SOUZA SOARES',
+    'teixeiranascimentoruan': 'RUAN TEIXEIRA NASCIMENTO',
+    'thiagoleaodasilvacarlos': 'CARLOS THIAGO LEAO DA SILVA',
+    'thiagosantana': 'THIAGO SANTANA',
+    'tiagoguzzo': 'TIAGO GUZZO',
+    'uebsonmorais': 'UEBSON MORAIS',
+    'vieiradamottafilhodarcy': 'DARCY VIEIRA DA MOTTA FILHO',
+    'viniciusdeoliveiraribeiromarcos': 'MARCOS VINICIUS DE OLIVEIRA RIBEIRO',
+    'viniciusdeoliveirawilliam': 'WILLIAM VINICIUS DE OLIVEIRA',
+    'viniciusdossantosmarcus': 'MARCUS VINICIUS DOS SANTOS',
+    'viniciussilvadecastroandre': 'ANDRE VINICIUS SILVA DE CASTRO',
+    'walacegalvao': 'WALACE GALVÃO',
+    'walacerocha': 'WALACE ROCHA',
+    'wallaceribeirodasilva': 'WALLACE RIBEIRO DA SILVA',
+    'wiliangalvao': 'WILIAN GALVAO',
+    'willamredinlima': 'WILLAM REDIN LIMA',
+    'wilsonfidelis': 'WILSON FIDELIS',
+    'yuriladeiramurakamiallan': 'ALLAN YURI LADEIRA MURAKAMI',
+}
+
+
+def _normalizar_nome_equipe(valor, mapa):
+    if pd.isna(valor):
+        return valor
+    texto = str(valor).strip()
+    if not texto:
+        return texto
+    chave = _normalizar_texto_filtro(texto)
+    if not chave:
+        return texto
+    novo = mapa.get(chave)
+    if novo is None:
+        return texto
+    novo_txt = str(novo).strip()
+    return novo_txt if novo_txt else texto
+
+
+def _aplicar_mapa_equipes(df, col_equipe):
+    if df.empty or col_equipe not in df.columns:
+        return df
+    if not EQUIPES_NOME_MAPA:
+        return df
+    df[col_equipe] = df[col_equipe].apply(lambda v: _normalizar_nome_equipe(v, EQUIPES_NOME_MAPA))
+    return df
+
 EQUIPES_CONTRATO_SOC_MAP = {
     _normalizar_texto_filtro(equipe): equipe
     for equipe in EQUIPES_CONTRATO_SOC
@@ -1239,17 +1536,11 @@ def _gerar_designados_fim_jornada(df_execucao):
     if df_execucao.empty:
         return pd.DataFrame(columns=_colunas_padrao_designados())
 
-    col_causa = _selecionar_coluna(
-        df_execucao,
-        ["Causa/Descritivo Resultado", "Causa", "Descritivo"]
-    ) or _selecionar_coluna_fuzzy(df_execucao, inclui=["causa"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["descritivo"])
-
-    if not col_causa:
+    mascara_fjl = _mascara_fim_jornada(df_execucao)
+    if not mascara_fjl.any():
         return pd.DataFrame(columns=_colunas_padrao_designados())
 
-    causa_alvo = "fjl - fim da jornada laborativa"
-    serie_causa = df_execucao[col_causa].astype(str).str.strip().str.casefold()
-    base = df_execucao[serie_causa == causa_alvo].copy()
+    base = df_execucao[mascara_fjl].copy()
     if base.empty:
         return pd.DataFrame(columns=_colunas_padrao_designados())
 
@@ -1278,13 +1569,29 @@ def _gerar_designados_fim_jornada(df_execucao):
 def _mascara_fim_jornada(df_execucao):
     if df_execucao.empty:
         return pd.Series(False, index=df_execucao.index)
+    colunas_candidatas = []
     col_causa = _selecionar_coluna(
         df_execucao,
         ["Causa/Descritivo Resultado", "Causa", "Descritivo"]
     ) or _selecionar_coluna_fuzzy(df_execucao, inclui=["causa"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["descritivo"])
-    if not col_causa:
+    if col_causa:
+        colunas_candidatas.append(col_causa)
+    col_resultado = _selecionar_coluna(df_execucao, ["Resultado", "Retorno"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["resultado"])
+    if col_resultado:
+        colunas_candidatas.append(col_resultado)
+    col_estado = _selecionar_coluna(df_execucao, ["Estado TdC", "Estado"]) or _selecionar_coluna_fuzzy(df_execucao, inclui=["estado"])
+    if col_estado:
+        colunas_candidatas.append(col_estado)
+
+    if not colunas_candidatas:
         return pd.Series(False, index=df_execucao.index)
-    return df_execucao[col_causa].astype(str).str.strip().str.casefold().eq("fjl - fim da jornada laborativa")
+
+    causa_alvo = "fjl - fim da jornada laborativa"
+    mascara = pd.Series(False, index=df_execucao.index)
+    for col in dict.fromkeys(colunas_candidatas):
+        serie = df_execucao[col].astype(str).str.strip().str.casefold()
+        mascara = mascara | serie.eq(causa_alvo)
+    return mascara
 
 def _colunas_padrao_coordenadas():
     return ['Instalação', 'Latitude', 'Longitude']
@@ -1341,16 +1648,28 @@ def _vincular_coordenadas_designados(df_designados, df_coordenadas):
     return df_merge.drop(columns=["_chave_cliente", "Latitude Coord", "Longitude Coord"])
 
 @st.cache_data(ttl=3600)
-def carregar_dados():
-    if "gsheet_id" in st.secrets:
-        df, df_coordenadas = _carregar_gsheet()
+def carregar_dados(setor_ativo):
+    if _deve_usar_gsheet(setor_ativo):
+        df, df_coordenadas = _carregar_gsheet(setor_ativo)
     else:
-        df = _carregar_local()
+        df = _carregar_local(setor_ativo)
         df_coordenadas = _carregar_coordenadas_local()
     df = _aplicar_tramites(df)
     mascara_fjl = _mascara_fim_jornada(df)
     df_designados = _gerar_designados_fim_jornada(df)
     df_execucao = df.loc[~mascara_fjl].copy() if mascara_fjl.any() else df
+    col_equipe_execucao = (
+        _selecionar_coluna(df_execucao, ["Equipe", "Equipe_x", "Recurso", "Equipe Designada"])
+        or _selecionar_coluna_fuzzy(df_execucao, inclui=["equipe"])
+    )
+    if col_equipe_execucao:
+        df_execucao = _aplicar_mapa_equipes(df_execucao, col_equipe_execucao)
+    col_equipe_designados = (
+        _selecionar_coluna(df_designados, ["Equipe Designada", "Equipe", "Recurso"])
+        or _selecionar_coluna_fuzzy(df_designados, inclui=["equipe"])
+    )
+    if col_equipe_designados:
+        df_designados = _aplicar_mapa_equipes(df_designados, col_equipe_designados)
     return df_execucao, df_designados, df_coordenadas
 
 
@@ -1362,13 +1681,34 @@ if not setor_ativo:
     st.error("Seu usuário não possui setor liberado.")
     st.stop()
 
-if setor_ativo != "SOC":
+setor_norm = _normalizar_setor_ativo(setor_ativo)
+if setor_norm not in {"SOC", "NEGOCIACAO"}:
     _render_logo_tema(LOGO_LIGHT_PATH, LOGO_DARK_PATH, max_width=220, container=main_logo_slot)
     st.info(f"O módulo do setor **{_setor_label(setor_ativo)}** está em desenvolvimento. Em breve.")
     st.stop()
 
+setor_anterior = st.session_state.get("setor_ativo_anterior")
+if setor_anterior != setor_norm:
+    st.session_state["setor_ativo_anterior"] = setor_norm
+    for chave in (
+        "filtro_mes_ano",
+        "filtro_data",
+        "filtro_todos_co",
+        "filtro_co",
+        "filtro_todos_municipios",
+        "filtro_municipios",
+        "filtro_todas_equipes",
+        "filtro_equipes",
+        "filtro_todos_setores",
+        "filtro_setores",
+        "filtro_todos_status",
+        "filtro_status",
+    ):
+        st.session_state.pop(chave, None)
+    st.session_state.pop("exibir_loading_filtros", None)
+
 try:
-    df, df_designados, df_coordenadas = carregar_dados()
+    df, df_designados, df_coordenadas = carregar_dados(setor_norm)
 
     COL_ID = _selecionar_coluna(df, ["Código TdC", "codigo tdc", "codigo_tdc"]) or "Código TdC"
     COL_EQUIPE = _selecionar_coluna(df, ["Equipe", "Equipe_x"]) or "Equipe"
@@ -1386,6 +1726,19 @@ try:
     COL_SETOR = "Setor"
     COL_TRAMITE = _selecionar_coluna(df, ["Tramite", "Trâmite"]) or "Tramite"
     COL_CAUSA = _selecionar_coluna(df, ["Causa/Descritivo Resultado", "Causa", "Descritivo"]) or "Causa/Descritivo Resultado"
+    COL_MUNICIPIO = (
+        _selecionar_coluna(df, ["Município", "Municipio", "Cidade", "Cidade/Município", "Cidade/Municipio"])
+        or _selecionar_coluna_fuzzy(df, inclui=["municip"])
+        or _selecionar_coluna_fuzzy(df, inclui=["cidade"])
+    )
+    COL_CO = (
+        _selecionar_coluna(
+            df,
+            ["CO", "C.O", "C O", "Centro Operativo", "CentroOperativo", "Centro Operacional", "CentroOperacional"]
+        )
+        or _selecionar_coluna_fuzzy(df, inclui=["centro", "operativo"])
+        or _selecionar_coluna_fuzzy(df, inclui=["centro", "operacional"])
+    )
     COL_D_ID = 'Código TdC'
     COL_D_CLIENTE = 'Código Cliente'
     COL_D_EQUIPE = 'Equipe Designada'
@@ -1427,9 +1780,12 @@ try:
     df["Data_Crua"] = [d[0] for d in datas]
     df["Hora_Inicio_Crua"] = [d[1] for d in datas]
 
-    df["DataHora"] = pd.to_datetime(df["Data_Crua"] + " " + df["Hora_Inicio_Crua"], dayfirst=True, errors="coerce")
-    df["Data_BR"] = pd.to_datetime(df["Data_Crua"], dayfirst=True, errors="coerce").dt.strftime("%d/%m/%Y")
-    df["Mes"] = pd.to_datetime(df["Data_Crua"], dayfirst=True, errors="coerce").dt.to_period("M").astype(str)
+    data_crua = df["Data_Crua"].where(df["Data_Crua"].notna(), "").astype(str).str.strip()
+    hora_crua = df["Hora_Inicio_Crua"].where(df["Hora_Inicio_Crua"].notna(), "").astype(str).str.strip()
+    data_hora_concat = (data_crua + " " + hora_crua).str.strip()
+    df["DataHora"] = pd.to_datetime(data_hora_concat, dayfirst=True, errors="coerce")
+    df["Data_BR"] = pd.to_datetime(data_crua, dayfirst=True, errors="coerce").dt.strftime("%d/%m/%Y")
+    df["Mes"] = pd.to_datetime(data_crua, dayfirst=True, errors="coerce").dt.to_period("M").astype(str)
 
     df_designados["DataHora"] = _parse_data_flexivel(df_designados[COL_D_DATA])
     df_designados["Data_BR"] = df_designados["DataHora"].dt.strftime("%d/%m/%Y")
@@ -1437,6 +1793,9 @@ try:
 
     df[COL_HORA_INI] = df[COL_HORA_INI].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
     df[COL_HORA_FIM] = df[COL_HORA_FIM].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
+
+    def _marcar_loading_filtros():
+        st.session_state["exibir_loading_filtros"] = True
 
     # Filtros
     st.sidebar.header("🔍 Filtros")
@@ -1465,7 +1824,7 @@ try:
     mes_map = dict(zip(meses_labels, meses_disponiveis))
     if "filtro_mes_ano" not in st.session_state or st.session_state["filtro_mes_ano"] not in meses_labels:
         st.session_state["filtro_mes_ano"] = meses_labels[0]
-    mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels, key="filtro_mes_ano")
+    mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels, key="filtro_mes_ano", on_change=_marcar_loading_filtros)
     mes_selecionado = mes_map[mes_selecionado_label]
 
     df_mes = df[df["Mes"] == mes_selecionado]
@@ -1480,15 +1839,132 @@ try:
         st.stop()
     if "filtro_data" not in st.session_state or st.session_state["filtro_data"] not in datas_ordenadas:
         st.session_state["filtro_data"] = datas_ordenadas[0]
-    data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas, key="filtro_data")
+    data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas, key="filtro_data", on_change=_marcar_loading_filtros)
 
     df_f1 = df_mes[df_mes["Data_BR"] == data_selecionada]
     df_designados_f1 = df_designados_mes[df_designados_mes["Data_BR"] == data_selecionada]
 
+    co_selecionados = []
+    todos_co = True
+    exibir_filtro_co = setor_norm == "NEGOCIACAO"
+    co_disponiveis = []
+    tem_col_co = (
+        setor_norm == "NEGOCIACAO"
+        and COL_CO
+        and COL_CO in df_mes.columns
+    )
+
+    def _coletar_cos(df_base):
+        cos_raw = df_base[COL_CO].dropna().astype(str).str.strip()
+        co_norm_map = {}
+        for co in cos_raw:
+            co_label = _extrair_label_co(co) or str(co).strip()
+            if not co_label:
+                continue
+            co_norm = _normalizar_texto_filtro(co_label)
+            if not co_norm:
+                continue
+            if co_norm not in co_norm_map:
+                co_norm_map[co_norm] = co_label
+        return sorted(co_norm_map.values())
+
+    if tem_col_co:
+        co_disponiveis = _coletar_cos(df_f1)
+        if not co_disponiveis and not df_mes.empty:
+            co_disponiveis = _coletar_cos(df_mes)
+
+    if setor_norm == "NEGOCIACAO":
+        todos_co = st.sidebar.checkbox(
+            "Selecionar todos os Centros Operativos",
+            value=False,
+            key="filtro_todos_co",
+            on_change=_marcar_loading_filtros,
+            disabled=not tem_col_co,
+        )
+        if todos_co:
+            co_selecionados = co_disponiveis
+        else:
+            co_selecionados = st.sidebar.multiselect(
+                "🏢 Centros Operativos",
+                co_disponiveis,
+                key="filtro_co",
+                on_change=_marcar_loading_filtros,
+                disabled=not tem_col_co,
+            )
+        if co_disponiveis:
+            if co_selecionados:
+                co_norm = {
+                    _normalizar_texto_filtro(c)
+                    for c in co_selecionados
+                    if str(c).strip()
+                }
+                co_norm_serie = df_f1[COL_CO].apply(
+                    lambda v: _normalizar_texto_filtro(_extrair_label_co(v) or str(v).strip())
+                )
+                df_f1 = df_f1[co_norm_serie.isin(co_norm)]
+            elif not todos_co:
+                df_f1 = df_f1.iloc[0:0]
+
+    municipios_selecionados = []
+    todos_municipios = True
+    exibir_filtro_municipio = setor_norm == "NEGOCIACAO"
+    municipios_disponiveis = []
+    tem_col_municipio = (
+        setor_norm == "NEGOCIACAO"
+        and COL_MUNICIPIO
+        and COL_MUNICIPIO in df_mes.columns
+    )
+
+    def _coletar_municipios(df_base):
+        municipios_raw = df_base[COL_MUNICIPIO].dropna().astype(str).str.strip()
+        municipios_norm_map = {}
+        for municipio in municipios_raw:
+            municipio_norm = _normalizar_texto_filtro(municipio)
+            if not municipio_norm:
+                continue
+            if municipio_norm not in municipios_norm_map:
+                municipios_norm_map[municipio_norm] = municipio
+        return sorted(municipios_norm_map.values())
+
+    if tem_col_municipio:
+        municipios_disponiveis = _coletar_municipios(df_f1)
+        if not municipios_disponiveis and not df_mes.empty:
+            municipios_disponiveis = _coletar_municipios(df_mes)
+
+    if setor_norm == "NEGOCIACAO":
+        todos_municipios = st.sidebar.checkbox(
+            "Selecionar todos os Municípios",
+            value=False,
+            key="filtro_todos_municipios",
+            on_change=_marcar_loading_filtros,
+            disabled=not tem_col_municipio,
+        )
+        if todos_municipios:
+            municipios_selecionados = municipios_disponiveis
+        else:
+            municipios_selecionados = st.sidebar.multiselect(
+                "🏘️ Municípios",
+                municipios_disponiveis,
+                key="filtro_municipios",
+                on_change=_marcar_loading_filtros,
+                disabled=not tem_col_municipio,
+            )
+        if municipios_disponiveis:
+            if municipios_selecionados:
+                municipios_norm = {
+                    _normalizar_texto_filtro(m)
+                    for m in municipios_selecionados
+                    if str(m).strip()
+                }
+                municipio_norm_serie = df_f1[COL_MUNICIPIO].apply(_normalizar_texto_filtro)
+                df_f1 = df_f1[municipio_norm_serie.isin(municipios_norm)]
+            elif not todos_municipios:
+                df_f1 = df_f1.iloc[0:0]
+
     st.sidebar.markdown("---")
 
     equipes_disponiveis = sorted(df_f1[COL_EQUIPE].dropna().unique().tolist())
-    equipes_contrato_map = EQUIPES_CONTRATO_SOC_MAP
+    equipes_contrato_map = EQUIPES_CONTRATO_SOC_MAP if setor_norm == "SOC" else {}
     if equipes_contrato_map:
         equipes_norm = set(equipes_contrato_map.keys())
         equipes_filtradas = []
@@ -1502,51 +1978,37 @@ try:
             ):
                 equipes_filtradas.append(equipe)
         equipes_disponiveis = equipes_filtradas
-    todas_equipes = st.sidebar.checkbox("Selecionar todas as Equipes", value=False)
+    todas_equipes = st.sidebar.checkbox("Selecionar todas as Equipes", value=False, key="filtro_todas_equipes", on_change=_marcar_loading_filtros)
     if todas_equipes:
         equipes_selecionadas = equipes_disponiveis
     else:
-        equipes_selecionadas = st.sidebar.multiselect("👷 Equipes", equipes_disponiveis)
+        equipes_selecionadas = st.sidebar.multiselect("👷 Equipes", equipes_disponiveis, key="filtro_equipes", on_change=_marcar_loading_filtros)
 
     df_f2 = df_f1[df_f1[COL_EQUIPE].isin(equipes_selecionadas)]
 
     setores_disponiveis = sorted(df_f2[COL_SETOR].dropna().unique().tolist())
-    todos_setores = st.sidebar.checkbox("Selecionar todos os Setores", value=False)
+    todos_setores = st.sidebar.checkbox("Selecionar todos os Setores", value=False, key="filtro_todos_setores", on_change=_marcar_loading_filtros)
     if todos_setores:
         setores_selecionados = setores_disponiveis
     else:
-        setores_selecionados = st.sidebar.multiselect("🏢 Setores ", setores_disponiveis)
+        setores_selecionados = st.sidebar.multiselect("🏢 Setores ", setores_disponiveis, key="filtro_setores", on_change=_marcar_loading_filtros)
 
     df_f3 = df_f2[df_f2[COL_SETOR].isin(setores_selecionados)]
 
     status_disponiveis = sorted(df_f3[COL_STATUS].dropna().unique().tolist())
-    todos_status = st.sidebar.checkbox("Selecionar todos os Status", value=True)
+    todos_status = st.sidebar.checkbox("Selecionar todos os Status", value=True, key="filtro_todos_status", on_change=_marcar_loading_filtros)
     if todos_status:
         status_selecionados = status_disponiveis
     else:
-        status_selecionados = st.sidebar.multiselect("✅ Status da Atividade", status_disponiveis)
+        status_selecionados = st.sidebar.multiselect("✅ Status da Atividade", status_disponiveis, key="filtro_status", on_change=_marcar_loading_filtros)
 
     filtros_aplicados = bool(
         setores_selecionados
         or equipes_selecionadas
+        or (setor_norm == "NEGOCIACAO" and not todos_co and co_selecionados)
+        or (setor_norm == "NEGOCIACAO" and not todos_municipios and municipios_selecionados)
         or (not todos_status and status_selecionados)
     )
-
-    assinatura_filtros = (
-        mes_selecionado,
-        data_selecionada,
-        tuple(equipes_selecionadas),
-        tuple(setores_selecionados),
-        bool(todos_status),
-        tuple(status_selecionados),
-    )
-    assinatura_anterior = st.session_state.get("assinatura_filtros")
-    if assinatura_anterior is None:
-        st.session_state["assinatura_filtros"] = assinatura_filtros
-    elif assinatura_anterior != assinatura_filtros:
-        st.session_state["assinatura_filtros"] = assinatura_filtros
-        st.session_state["exibir_loading_filtros"] = True
-        st.rerun()
 
     df_filtrado = df_f3[df_f3[COL_STATUS].isin(status_selecionados)]
 
@@ -1936,6 +2398,8 @@ try:
         status_txt = html_lib.escape(_resumo_lista(status_selecionados), quote=True)
         mes_txt = html_lib.escape(str(mes_selecionado_label), quote=True)
         data_txt = html_lib.escape(str(data_selecionada), quote=True)
+        co_txt = html_lib.escape(_resumo_lista(co_selecionados), quote=True)
+        municipios_txt = html_lib.escape(_resumo_lista(municipios_selecionados), quote=True)
         qtd_exec_txt = html_lib.escape(str(len(df_filtrado)), quote=True)
         qtd_visitas_total = len(df_f3)
         qtd_total_servicos = total_designados_filtrados + qtd_visitas_total
@@ -1943,6 +2407,19 @@ try:
         qtd_des_txt = html_lib.escape(str(total_designados_filtrados), quote=True)
         qtd_rastro_arquivos_txt = html_lib.escape(str(total_rastro_arquivos), quote=True)
         qtd_rastro_pontos_txt = html_lib.escape(str(total_rastro_pontos), quote=True)
+
+        linha_co = (
+            f'<tr><td style="font-weight:bold; padding:2px 4px;">Centro Operativo</td>'
+            f'<td style="padding:2px 4px;">{co_txt}</td></tr>'
+            if exibir_filtro_co
+            else ""
+        )
+        linha_municipio = (
+            f'<tr><td style="font-weight:bold; padding:2px 4px;">Município</td>'
+            f'<td style="padding:2px 4px;">{municipios_txt}</td></tr>'
+            if exibir_filtro_municipio
+            else ""
+        )
 
         resumo_filtros_html = f"""
         <div style="
@@ -1971,6 +2448,8 @@ try:
             <table style="width:100%; border-collapse: collapse;">
                 <tr><td style="font-weight:bold; padding:2px 4px;">Mês/Ano</td><td style="padding:2px 4px;">{mes_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Data</td><td style="padding:2px 4px;">{data_txt}</td></tr>
+                {linha_co}
+                {linha_municipio}
                 <tr><td style="font-weight:bold; padding:2px 4px;">Equipes</td><td style="padding:2px 4px;">{equipes_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Setores</td><td style="padding:2px 4px;">{setores_txt}</td></tr>
                 <tr><td style="font-weight:bold; padding:2px 4px;">Status</td><td style="padding:2px 4px;">{status_txt}</td></tr>
