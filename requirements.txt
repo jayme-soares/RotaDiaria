@@ -8,3 +8,4 @@ gspread
 google-auth
 requests
 streamlit-autorefresh
+libsql-client
