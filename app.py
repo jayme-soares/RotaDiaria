@@ -11,6 +11,8 @@ import time
 import uuid
 import requests
 import html as html_lib
+import libsql_client
+
 try:
     from streamlit_autorefresh import st_autorefresh
 except Exception:
@@ -39,46 +41,14 @@ INTRO_WEBM_PATH = os.path.join(LOGOS_DIR, "intro.webm")
 INTRO_MP4_PATH = os.path.join(LOGOS_DIR, "intro.mp4")
 
 EQUIPES_CONTRATO_SOC = [
-    "NI201LRP-B",
-    "NI202LRP-B",
-    "NI203LRP-B",
-    "NI204LRP-B",
-    "NI205LRP-B",
-    "NI206LRP-B",
-    "NI207SRP-B",
-    "NI208LRP-B",
-    "NI209LRP-B",
-    "NI210SRP-B",
-    "NI211LRP-B",
-    "NI212LRP-B",
-    "NI213LRP-B",
-    "NI214LRP-B",
-    "NI215LRP-B",
-    "NI216LRP-B",
-    "NI217LRP-B",
-    "NI218LRP-B",
-    "NI219LLP-B",
-    "NI220LLP-B",
-    "NI221LLP-B",
-    "NI222LLP-B",
-    "NI223LLP-B",
-    "NI224LLP-B",
-    "NI225LLP-B",
-    "NI226SLP-B",
-    "NI201LFP-B",
-    "NI202LFP-B",
-    "NI203LFP-B",
-    "NI204LFP-B",
-    "NI201LLP-B",
-    "NI202LLP-B",
-    "NI203LLP-B",
-    "NI204LLP-B",
-    "NI201SLP-B",
-    "NI202SLP-B",
-    "NI203SLP-B",
-    "NI204SLP-B",
-    "NI205SLP-B",
-    "NI206SLP-B",
+    "NI201LRP-B", "NI202LRP-B", "NI203LRP-B", "NI204LRP-B", "NI205LRP-B",
+    "NI206LRP-B", "NI207SRP-B", "NI208LRP-B", "NI209LRP-B", "NI210SRP-B",
+    "NI211LRP-B", "NI212LRP-B", "NI213LRP-B", "NI214LRP-B", "NI215LRP-B",
+    "NI216LRP-B", "NI217LRP-B", "NI218LRP-B", "NI219LLP-B", "NI220LLP-B",
+    "NI221LLP-B", "NI222LLP-B", "NI223LLP-B", "NI224LLP-B", "NI225LLP-B",
+    "NI226SLP-B", "NI201LFP-B", "NI202LFP-B", "NI203LFP-B", "NI204LFP-B",
+    "NI201LLP-B", "NI202LLP-B", "NI203LLP-B", "NI204LLP-B", "NI201SLP-B",
+    "NI202SLP-B", "NI203SLP-B", "NI204SLP-B", "NI205SLP-B", "NI206SLP-B",
     "NI207SLP-B",
 ]
 
@@ -998,7 +968,6 @@ with st.sidebar:
     _render_tempo_logado_realtime(st.session_state.get("session_started_at", int(time.time())))
 
 
-
 setores_liberados = auth_user.get("allowed_sectors", [])
 if not isinstance(setores_liberados, list):
     setores_liberados = _setores_do_storage(setores_liberados)
@@ -1038,6 +1007,7 @@ if "last_activity_at" not in st.session_state:
 
 if not is_heartbeat:
     st.session_state["last_activity_at"] = agora
+
 
 tempo_logado_seg = max(0, agora - int(st.session_state.get("session_started_at", agora)))
 tempo_inativo_seg = max(0, agora - int(st.session_state.get("last_activity_at", agora)))
@@ -1140,6 +1110,90 @@ def _deve_usar_gsheet(setor_ativo):
     return not os.path.exists(db_path)
 
 
+def _carregar_turso(setor_ativo):
+    """Carrega dados do Turso apenas com as colunas necessárias para economizar RAM."""
+    setor_norm = _normalizar_setor_ativo(setor_ativo)
+    
+    if setor_norm == "SOC":
+        url = st.secrets.get("turso_soc_url")
+        token = st.secrets.get("turso_soc_token")
+        main_table = "base_producao"
+    elif setor_norm == "NEGOCIACAO":
+        url = st.secrets.get("turso_neg_url")
+        token = st.secrets.get("turso_neg_token")
+        main_table = "base_producao_neg" 
+    else:
+        raise ValueError(f"Setor não suportado para Turso: {setor_ativo}")
+
+    if not url or not token:
+        raise RuntimeError(f"Credenciais do Turso para o setor {setor_norm} não encontradas em st.secrets.")
+
+    try:
+        cliente = libsql_client.create_client_sync(url=url, auth_token=token)
+        
+        # 1. Pega apenas uma linha vazia para descobrir o nome de todas as colunas do banco
+        res_header = cliente.execute(f'SELECT * FROM "{main_table}" LIMIT 1')
+        if not res_header.columns:
+            return pd.DataFrame()
+            
+        todas_colunas = res_header.columns
+        
+        # 2. Lista mestra de todas as colunas que o código do MAGO realmente precisa ler
+        colunas_alvo = [
+            "Código TdC", "codigo_tdc", "codigo tdc",
+            "Equipe", "Equipe_x", "Recurso", "Equipe Designada",
+            "Latitude", "lat", "Longitude", "lon", "long",
+            "Data Início", "Data Inicio", "Data", "Data Fim", "Data Final",
+            "Estado TdC", "Estado", "Resultado", "Retorno",
+            "Tipo TdC", "Tipo Serviço", "Tipo Servico", "Setor", "Tipo Operação",
+            "Causa/Descritivo Resultado", "Causa", "Descritivo",
+            "Ciclo de trabalho", "Ciclo Trabalho",
+            "Endereço", "Endereco", "Logradouro", "Endereço Completo",
+            "Município", "Municipio", "Cidade",
+            "CO", "C.O", "Centro Operativo",
+            "Código Cliente", "Instalação"
+        ]
+        
+        # 3. Filtra a lista, pegando só as colunas da nuvem que estão na nossa lista de interesse
+        colunas_magras = [col for col in todas_colunas if col in colunas_alvo]
+        
+        # Monta a string do SELECT (ex: "Código TdC", "Equipe", "Latitude"...)
+        select_cols = ", ".join([f'"{col}"' for col in colunas_magras]) if colunas_magras else "*"
+
+        # 4. Paginação puxando APENAS as colunas magras
+        limit = 5000
+        offset = 0
+        todas_linhas = []
+        
+        while True:
+            query = f'SELECT {select_cols} FROM "{main_table}" LIMIT {limit} OFFSET {offset}'
+            resultado = cliente.execute(query)
+            
+            if not resultado.rows:
+                break
+                
+            todas_linhas.extend(resultado.rows)
+            
+            if len(resultado.rows) < limit:
+                break
+                
+            offset += limit
+            
+        cliente.close()
+        
+        if not todas_linhas:
+            st.warning(f"A tabela '{main_table}' conectou no Turso, mas está vazia.")
+            return pd.DataFrame()
+            
+        # Monta o DataFrame final levinho!
+        df_main = pd.DataFrame([tuple(linha) for linha in todas_linhas], columns=colunas_magras if colunas_magras else todas_colunas)
+        
+        return df_main
+
+    except Exception as e:
+        raise RuntimeError(f"Erro ao carregar dados do Turso: {str(e)}")
+
+
 def _carregar_gsheet(setor_ativo):
     """Lê dados das abas do Google Sheets (produção no Cloud)."""
     import gspread
@@ -1183,15 +1237,28 @@ def _carregar_gsheet(setor_ativo):
     coordenadas_values = ws_coordenadas.get_all_values() if ws_coordenadas is not None else []
 
     df_dados = _valores_para_df(dados_values)
-    df_coordenadas = _padronizar_coordenadas(_valores_para_df(coordenadas_values))
-    return df_dados, df_coordenadas
+    return df_dados, None
 
 
 def _aplicar_tramites(df):
     """Faz merge com Tramites.xlsx local para obter a coluna 'Tramite'."""
-    if os.path.exists(TRAMITES_PATH):
+    if os.path.exists(TRAMITES_PATH) and not df.empty:
         df_tramites = pd.read_excel(TRAMITES_PATH)
-        df = df.merge(df_tramites, how='left')
+        
+        col_chave_df = _selecionar_coluna(
+            df, 
+            ["Causa/Descritivo Resultado", "Causa", "Descritivo", "Resultado"]
+        )
+        
+        if col_chave_df:
+            col_chave_excel = df_tramites.columns[0]
+            df = df.merge(df_tramites, left_on=col_chave_df, right_on=col_chave_excel, how='left')
+        else:
+            try:
+                df = df.merge(df_tramites, how='left')
+            except Exception:
+                pass
+                
     return df
 
 def _normalizar_nome_coluna(nome):
@@ -1593,84 +1660,36 @@ def _mascara_fim_jornada(df_execucao):
         mascara = mascara | serie.eq(causa_alvo)
     return mascara
 
-def _colunas_padrao_coordenadas():
-    return ['Instalação', 'Latitude', 'Longitude']
-
-def _padronizar_coordenadas(df_raw):
-    if df_raw.empty:
-        return pd.DataFrame(columns=_colunas_padrao_coordenadas())
-
-    col_instalacao = _selecionar_coluna(df_raw, ["Instalação", "Instalacao", "codigo_cliente", "Código Cliente"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["instala"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["cliente"])
-    col_lat = _selecionar_coluna(df_raw, ["Latitude", "lat"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lat"])
-    col_lon = _selecionar_coluna(df_raw, ["Longitude", "lon", "long"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["lon"]) or _selecionar_coluna_fuzzy(df_raw, inclui=["long"])
-
-    df = pd.DataFrame()
-    df['Instalação'] = df_raw[col_instalacao] if col_instalacao else ""
-    df['Latitude'] = pd.to_numeric(df_raw[col_lat], errors="coerce") if col_lat else pd.NA
-    df['Longitude'] = pd.to_numeric(df_raw[col_lon], errors="coerce") if col_lon else pd.NA
-    return df
-
-def _carregar_coordenadas_local():
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        df_raw = pd.read_sql_query("SELECT * FROM base_coordenadas", conn)
-    except pd.errors.DatabaseError:
-        return pd.DataFrame(columns=_colunas_padrao_coordenadas())
-    finally:
-        conn.close()
-    return _padronizar_coordenadas(df_raw)
-
-def _vincular_coordenadas_designados(df_designados, df_coordenadas):
-    if df_designados.empty or df_coordenadas.empty:
-        return df_designados
-
-    designados = df_designados.copy()
-    coordenadas = df_coordenadas.copy()
-
-    designados["_chave_cliente"] = designados["Código Cliente"].apply(_normalizar_chave_codigo)
-    coordenadas["_chave_cliente"] = coordenadas["Instalação"].apply(_normalizar_chave_codigo)
-
-    coords_validas = coordenadas[
-        (coordenadas["_chave_cliente"] != "") &
-        coordenadas["Latitude"].notna() &
-        coordenadas["Longitude"].notna()
-    ].copy()
-    coords_validas = coords_validas.drop_duplicates(subset=["_chave_cliente"], keep="first")
-    coords_validas = coords_validas.rename(columns={"Latitude": "Latitude Coord", "Longitude": "Longitude Coord"})
-
-    df_merge = designados.merge(
-        coords_validas[["_chave_cliente", "Latitude Coord", "Longitude Coord"]],
-        on="_chave_cliente",
-        how="left"
-    )
-    df_merge["Latitude"] = df_merge["Latitude"].fillna(df_merge["Latitude Coord"])
-    df_merge["Longitude"] = df_merge["Longitude"].fillna(df_merge["Longitude Coord"])
-    return df_merge.drop(columns=["_chave_cliente", "Latitude Coord", "Longitude Coord"])
 
 @st.cache_data(ttl=3600)
 def carregar_dados(setor_ativo):
-    if _deve_usar_gsheet(setor_ativo):
-        df, df_coordenadas = _carregar_gsheet(setor_ativo)
+    if "turso_soc_url" in st.secrets or "turso_neg_url" in st.secrets:
+        df = _carregar_turso(setor_ativo)
+    elif _deve_usar_gsheet(setor_ativo):
+        df, _ = _carregar_gsheet(setor_ativo) 
     else:
         df = _carregar_local(setor_ativo)
-        df_coordenadas = _carregar_coordenadas_local()
+
     df = _aplicar_tramites(df)
     mascara_fjl = _mascara_fim_jornada(df)
     df_designados = _gerar_designados_fim_jornada(df)
     df_execucao = df.loc[~mascara_fjl].copy() if mascara_fjl.any() else df
+    
     col_equipe_execucao = (
         _selecionar_coluna(df_execucao, ["Equipe", "Equipe_x", "Recurso", "Equipe Designada"])
         or _selecionar_coluna_fuzzy(df_execucao, inclui=["equipe"])
     )
     if col_equipe_execucao:
         df_execucao = _aplicar_mapa_equipes(df_execucao, col_equipe_execucao)
+        
     col_equipe_designados = (
         _selecionar_coluna(df_designados, ["Equipe Designada", "Equipe", "Recurso"])
         or _selecionar_coluna_fuzzy(df_designados, inclui=["equipe"])
     )
     if col_equipe_designados:
         df_designados = _aplicar_mapa_equipes(df_designados, col_equipe_designados)
-    return df_execucao, df_designados, df_coordenadas
+        
+    return df_execucao, df_designados
 
 
 if area_escolhida == "Administração":
@@ -1708,7 +1727,7 @@ if setor_anterior != setor_norm:
     st.session_state.pop("exibir_loading_filtros", None)
 
 try:
-    df, df_designados, df_coordenadas = carregar_dados(setor_norm)
+    df, df_designados = carregar_dados(setor_norm)
 
     COL_ID = _selecionar_coluna(df, ["Código TdC", "codigo tdc", "codigo_tdc"]) or "Código TdC"
     COL_EQUIPE = _selecionar_coluna(df, ["Equipe", "Equipe_x"]) or "Equipe"
@@ -1765,9 +1784,6 @@ try:
     df[COL_LON] = pd.to_numeric(df[COL_LON], errors="coerce")
     df_designados[COL_D_LAT] = pd.to_numeric(df_designados[COL_D_LAT], errors="coerce")
     df_designados[COL_D_LON] = pd.to_numeric(df_designados[COL_D_LON], errors="coerce")
-    df_designados = _vincular_coordenadas_designados(df_designados, df_coordenadas)
-    df_designados[COL_D_LAT] = pd.to_numeric(df_designados[COL_D_LAT], errors="coerce")
-    df_designados[COL_D_LON] = pd.to_numeric(df_designados[COL_D_LON], errors="coerce")
 
     def separar_data_hora(valor):
         if pd.isna(valor):
@@ -1807,18 +1823,9 @@ try:
         st.warning("Não foi possível montar o filtro de mês. Verifique o formato das colunas de data.")
         st.stop()
     nomes_meses = {
-        "01": "janeiro",
-        "02": "fevereiro",
-        "03": "março",
-        "04": "abril",
-        "05": "maio",
-        "06": "junho",
-        "07": "julho",
-        "08": "agosto",
-        "09": "setembro",
-        "10": "outubro",
-        "11": "novembro",
-        "12": "dezembro",
+        "01": "janeiro", "02": "fevereiro", "03": "março", "04": "abril",
+        "05": "maio", "06": "junho", "07": "julho", "08": "agosto",
+        "09": "setembro", "10": "outubro", "11": "novembro", "12": "dezembro",
     }
     meses_labels = [f"{nomes_meses.get(m.split('-')[1], m.split('-')[1])}/{m.split('-')[0]}" for m in meses_disponiveis]
     mes_map = dict(zip(meses_labels, meses_disponiveis))
@@ -2059,8 +2066,6 @@ try:
     st.sidebar.subheader("Designados")
     exibir_designados = st.sidebar.checkbox("Exibir camada de designados", value=True)
 
-    # Referência de execução para identificar "sobra":
-    # mesma data e mesmas equipes selecionadas (independente de setor/status).
     df_execucao_referencia = df_f1[df_f1[COL_EQUIPE].isin(equipes_selecionadas)]
     codigos_executados = {
         _normalizar_chave_codigo(cod)
@@ -2068,8 +2073,6 @@ try:
         if _normalizar_chave_codigo(cod)
     }
 
-    # Designados seguem os filtros existentes: data selecionada + equipes selecionadas.
-    # Não aplicamos filtro por setor/tipo para preservar todos os designados da equipe no dia.
     equipes_norm = {_normalizar_texto_filtro(e) for e in equipes_selecionadas if str(e).strip()}
     df_designados_tmp = df_designados_f1.copy()
     df_designados_tmp["_equipe_norm"] = df_designados_tmp[COL_D_EQUIPE].apply(_normalizar_texto_filtro)
@@ -2379,7 +2382,7 @@ try:
         🟢  Fundo Verde: Realizado | 🔴 Fundo Vermelho: Não Realizado | ⚫ Fundo Cinza: Designado |  
         🟩 Pino Verde: Início da Rota | ⬛ Pino Preto: Fim da Rota | 🔶 Linha tracejada: Rastro do veículo
         """)
-        # Apenas para debug (descomentar para visualizar)
+
         if exibir_designados:
             st.caption(f"Designados filtrados: {total_designados_filtrados} | Com coordenadas: {designados_com_coord}")
         if tem_rastro_visivel:
@@ -2466,7 +2469,7 @@ try:
         icone_mapa_uri = _arquivo_para_data_uri(LOGO_ICON_PATH)
         if icone_mapa_uri:
             icone_mapa_html = f"""
-           
+            
             <div style="
                 position: fixed;
                 bottom: 2px;
