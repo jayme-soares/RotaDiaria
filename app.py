@@ -11,7 +11,7 @@ import time
 import uuid
 import requests
 import html as html_lib
-import libsql_client  # Nova importação para o Turso
+import libsql_client
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -1111,7 +1111,7 @@ def _deve_usar_gsheet(setor_ativo):
 
 
 def _carregar_turso(setor_ativo):
-    """Carrega dados operacionais pesados do Turso com paginação para evitar Erro 502"""
+    """Carrega dados do Turso apenas com as colunas necessárias para economizar RAM."""
     setor_norm = _normalizar_setor_ativo(setor_ativo)
     
     if setor_norm == "SOC":
@@ -1131,28 +1131,49 @@ def _carregar_turso(setor_ativo):
     try:
         cliente = libsql_client.create_client_sync(url=url, auth_token=token)
         
-        # Paginação: fatiando o elefante de 5 em 5 mil para o roteador do Turso não engasgar
+        # 1. Pega apenas uma linha vazia para descobrir o nome de todas as colunas do banco
+        res_header = cliente.execute(f'SELECT * FROM "{main_table}" LIMIT 1')
+        if not res_header.columns:
+            return pd.DataFrame()
+            
+        todas_colunas = res_header.columns
+        
+        # 2. Lista mestra de todas as colunas que o código do MAGO realmente precisa ler
+        colunas_alvo = [
+            "Código TdC", "codigo_tdc", "codigo tdc",
+            "Equipe", "Equipe_x", "Recurso", "Equipe Designada",
+            "Latitude", "lat", "Longitude", "lon", "long",
+            "Data Início", "Data Inicio", "Data", "Data Fim", "Data Final",
+            "Estado TdC", "Estado", "Resultado", "Retorno",
+            "Tipo TdC", "Tipo Serviço", "Tipo Servico", "Setor", "Tipo Operação",
+            "Causa/Descritivo Resultado", "Causa", "Descritivo",
+            "Ciclo de trabalho", "Ciclo Trabalho",
+            "Endereço", "Endereco", "Logradouro", "Endereço Completo",
+            "Município", "Municipio", "Cidade",
+            "CO", "C.O", "Centro Operativo",
+            "Código Cliente", "Instalação"
+        ]
+        
+        # 3. Filtra a lista, pegando só as colunas da nuvem que estão na nossa lista de interesse
+        colunas_magras = [col for col in todas_colunas if col in colunas_alvo]
+        
+        # Monta a string do SELECT (ex: "Código TdC", "Equipe", "Latitude"...)
+        select_cols = ", ".join([f'"{col}"' for col in colunas_magras]) if colunas_magras else "*"
+
+        # 4. Paginação puxando APENAS as colunas magras
         limit = 5000
         offset = 0
         todas_linhas = []
-        colunas = None
         
         while True:
-            # Puxa fatias de 5.000 linhas por vez
-            query = f'SELECT * FROM "{main_table}" LIMIT {limit} OFFSET {offset}'
+            query = f'SELECT {select_cols} FROM "{main_table}" LIMIT {limit} OFFSET {offset}'
             resultado = cliente.execute(query)
             
-            # Se não vier nada, acabou a tabela
             if not resultado.rows:
                 break
                 
-            # Salva o nome das colunas na primeira passada
-            if colunas is None:
-                colunas = resultado.columns
-                
             todas_linhas.extend(resultado.rows)
             
-            # Se o lote vier com menos do que o limite, chegamos na última página
             if len(resultado.rows) < limit:
                 break
                 
@@ -1164,14 +1185,15 @@ def _carregar_turso(setor_ativo):
             st.warning(f"A tabela '{main_table}' conectou no Turso, mas está vazia.")
             return pd.DataFrame()
             
-        # Monta o DataFrame com todas as linhas coletadas
-        df_main = pd.DataFrame([tuple(linha) for linha in todas_linhas], columns=colunas)
+        # Monta o DataFrame final levinho!
+        df_main = pd.DataFrame([tuple(linha) for linha in todas_linhas], columns=colunas_magras if colunas_magras else todas_colunas)
         
         return df_main
 
     except Exception as e:
         raise RuntimeError(f"Erro ao carregar dados do Turso: {str(e)}")
-    
+
+
 def _carregar_gsheet(setor_ativo):
     """Lê dados das abas do Google Sheets (produção no Cloud)."""
     import gspread
