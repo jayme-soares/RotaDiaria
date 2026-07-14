@@ -12,6 +12,7 @@ import uuid
 import requests
 import html as html_lib
 import libsql_client
+import datetime
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -1110,90 +1111,42 @@ def _deve_usar_gsheet(setor_ativo):
     return not os.path.exists(db_path)
 
 
-def _carregar_turso(setor_ativo):
-    """Carrega dados do Turso apenas com as colunas necessárias para economizar RAM."""
+def _carregar_turso(setor_ativo, data_alvo=None):
+    """Carrega dados do Turso usando a biblioteca oficial, filtrando a Data Fim."""
     setor_norm = _normalizar_setor_ativo(setor_ativo)
-    
-    if setor_norm == "SOC":
-        url = st.secrets.get("turso_soc_url")
-        token = st.secrets.get("turso_soc_token")
-        main_table = "base_producao"
-    elif setor_norm == "NEGOCIACAO":
-        url = st.secrets.get("turso_neg_url")
-        token = st.secrets.get("turso_neg_token")
-        main_table = "base_producao_neg" 
-    else:
-        raise ValueError(f"Setor não suportado para Turso: {setor_ativo}")
-
-    if not url or not token:
-        raise RuntimeError(f"Credenciais do Turso para o setor {setor_norm} não encontradas em st.secrets.")
+    config = {
+        "SOC": {"url": st.secrets.get("turso_soc_url"), "token": st.secrets.get("turso_soc_token"), "table": "base_producao"},
+        "NEGOCIACAO": {"url": st.secrets.get("turso_neg_url"), "token": st.secrets.get("turso_neg_token"), "table": "base_producao_neg"}
+    }
+    cfg = config.get(setor_norm)
+    if not cfg: raise ValueError("Setor inválido")
 
     try:
-        cliente = libsql_client.create_client_sync(url=url, auth_token=token)
+        # Usando o cliente oficial, muito mais seguro para extrair as colunas
+        cliente = libsql_client.create_client_sync(url=cfg["url"], auth_token=cfg["token"])
         
-        # 1. Pega apenas uma linha vazia para descobrir o nome de todas as colunas do banco
-        res_header = cliente.execute(f'SELECT * FROM "{main_table}" LIMIT 1')
-        if not res_header.columns:
-            return pd.DataFrame()
+        sql = f'SELECT * FROM "{cfg["table"]}"'
+        if data_alvo:
+            # Filtro inteligente usando LIKE para puxar apenas o dia exato
+            sql += f" WHERE \"Data Fim\" LIKE '{data_alvo}%'"
             
-        todas_colunas = res_header.columns
+        resultado = cliente.execute(sql)
         
-        # 2. Lista mestra de todas as colunas que o código do MAGO realmente precisa ler
-        colunas_alvo = [
-            "Código TdC", "codigo_tdc", "codigo tdc",
-            "Equipe", "Equipe_x", "Recurso", "Equipe Designada",
-            "Latitude", "lat", "Longitude", "lon", "long",
-            "Data Início", "Data Inicio", "Data", "Data Fim", "Data Final",
-            "Estado TdC", "Estado", "Resultado", "Retorno",
-            "Tipo TdC", "Tipo Serviço", "Tipo Servico", "Setor", "Tipo Operação",
-            "Causa/Descritivo Resultado", "Causa", "Descritivo",
-            "Ciclo de trabalho", "Ciclo Trabalho",
-            "Endereço", "Endereco", "Logradouro", "Endereço Completo",
-            "Município", "Municipio", "Cidade",
-            "CO", "C.O", "Centro Operativo",
-            "Código Cliente", "Instalação"
-        ]
-        
-        # 3. Filtra a lista, pegando só as colunas da nuvem que estão na nossa lista de interesse
-        colunas_magras = [col for col in todas_colunas if col in colunas_alvo]
-        
-        # Monta a string do SELECT (ex: "Código TdC", "Equipe", "Latitude"...)
-        select_cols = ", ".join([f'"{col}"' for col in colunas_magras]) if colunas_magras else "*"
-
-        # 4. Paginação puxando APENAS as colunas magras
-        limit = 5000
-        offset = 0
-        todas_linhas = []
-        
-        while True:
-            query = f'SELECT {select_cols} FROM "{main_table}" LIMIT {limit} OFFSET {offset}'
-            resultado = cliente.execute(query)
+        # Se não houve serviço no dia selecionado, retorna uma base vazia, 
+        # MAS com os nomes das colunas mapeados para não gerar o erro no Streamlit!
+        if not resultado.rows:
+            cliente.close()
+            return pd.DataFrame(columns=resultado.columns)
             
-            if not resultado.rows:
-                break
-                
-            todas_linhas.extend(resultado.rows)
-            
-            if len(resultado.rows) < limit:
-                break
-                
-            offset += limit
-            
+        # Transforma o resultado no DataFrame com as colunas perfeitas
+        df = pd.DataFrame([tuple(linha) for linha in resultado.rows], columns=resultado.columns)
         cliente.close()
         
-        if not todas_linhas:
-            st.warning(f"A tabela '{main_table}' conectou no Turso, mas está vazia.")
-            return pd.DataFrame()
-            
-        # Monta o DataFrame final levinho!
-        df_main = pd.DataFrame([tuple(linha) for linha in todas_linhas], columns=colunas_magras if colunas_magras else todas_colunas)
-        
-        return df_main
+        return df
 
     except Exception as e:
-        raise RuntimeError(f"Erro ao carregar dados do Turso: {str(e)}")
-
-
+        raise RuntimeError(f"Erro ao conectar na API do Turso: {str(e)}")
+           
 def _carregar_gsheet(setor_ativo):
     """Lê dados das abas do Google Sheets (produção no Cloud)."""
     import gspread
@@ -1662,9 +1615,10 @@ def _mascara_fim_jornada(df_execucao):
 
 
 @st.cache_data(ttl=3600)
-def carregar_dados(setor_ativo):
+def carregar_dados(setor_ativo, data_alvo=None):
     if "turso_soc_url" in st.secrets or "turso_neg_url" in st.secrets:
-        df = _carregar_turso(setor_ativo)
+        # Repassa a data para filtrar no banco
+        df = _carregar_turso(setor_ativo, data_alvo)
     elif _deve_usar_gsheet(setor_ativo):
         df, _ = _carregar_gsheet(setor_ativo) 
     else:
@@ -1727,15 +1681,40 @@ if setor_anterior != setor_norm:
     st.session_state.pop("exibir_loading_filtros", None)
 
 try:
-    df, df_designados = carregar_dados(setor_norm)
+    # --- NOVA LÓGICA DO MENU LATERAL E DATAS ---
+    st.sidebar.header("🔍 Filtros")
+    
+    ontem = datetime.date.today() - datetime.timedelta(days=1)
+    primeiro_dia_ano = datetime.date(ontem.year, 1, 1)
+
+    def _marcar_loading_filtros():
+        st.session_state["exibir_loading_filtros"] = True
+
+    data_selecionada_obj = st.sidebar.date_input(
+        "📅 Selecione a Data",
+        value=ontem,
+        min_value=primeiro_dia_ano,
+        max_value=datetime.date.today(),
+        format="DD/MM/YYYY",
+    )
+    
+    data_selecionada = data_selecionada_obj.strftime("%d/%m/%Y")
+    mes_selecionado_label = data_selecionada_obj.strftime("%m/%Y")
+    mes_selecionado = data_selecionada_obj.strftime("%Y-%m")
+
+    # Agora o carregar dados só traz o dia que importa!
+    df, df_designados = carregar_dados(setor_norm, data_alvo=data_selecionada)
 
     COL_ID = _selecionar_coluna(df, ["Código TdC", "codigo tdc", "codigo_tdc"]) or "Código TdC"
     COL_EQUIPE = _selecionar_coluna(df, ["Equipe", "Equipe_x"]) or "Equipe"
     COL_LAT = _selecionar_coluna(df, ["Latitude", "lat"]) or "Latitude"
     COL_LON = _selecionar_coluna(df, ["Longitude", "lon", "long"]) or "Longitude"
-    COL_DATA = _selecionar_coluna(df, ["Data Início", "Data Inicio", "Data"]) or "Data Início"
-    COL_HORA_INI = COL_DATA
-    COL_HORA_FIM = _selecionar_coluna(df, ["Data Fim", "Data Final"]) or COL_DATA
+    
+    # A base do MAGO passa a ser a Data Fim
+    COL_DATA = _selecionar_coluna(df, ["Data Fim", "Data Final"]) or _selecionar_coluna(df, ["Data Início", "Data Inicio", "Data"]) or "Data Fim"
+    COL_HORA_INI = _selecionar_coluna(df, ["Data Início", "Data Inicio", "Data"]) or COL_DATA
+    COL_HORA_FIM = COL_DATA
+    
     COL_STATUS = _selecionar_coluna(df, ["Estado TdC", "Estado", "Resultado"]) or "Resultado"
     COL_RETORNO = _selecionar_coluna(df, ["Resultado", "Retorno"]) or COL_STATUS
     COL_SETOR_ORIGEM = _selecionar_coluna(
@@ -1801,55 +1780,16 @@ try:
     data_hora_concat = (data_crua + " " + hora_crua).str.strip()
     df["DataHora"] = pd.to_datetime(data_hora_concat, dayfirst=True, errors="coerce")
     df["Data_BR"] = pd.to_datetime(data_crua, dayfirst=True, errors="coerce").dt.strftime("%d/%m/%Y")
-    df["Mes"] = pd.to_datetime(data_crua, dayfirst=True, errors="coerce").dt.to_period("M").astype(str)
-
+    
     df_designados["DataHora"] = _parse_data_flexivel(df_designados[COL_D_DATA])
     df_designados["Data_BR"] = df_designados["DataHora"].dt.strftime("%d/%m/%Y")
-    df_designados["Mes"] = df_designados["DataHora"].dt.to_period("M").astype(str)
 
     df[COL_HORA_INI] = df[COL_HORA_INI].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
     df[COL_HORA_FIM] = df[COL_HORA_FIM].apply(lambda x: str(x).split(" ")[-1] if pd.notna(x) else "")
 
-    def _marcar_loading_filtros():
-        st.session_state["exibir_loading_filtros"] = True
-
-    # Filtros
-    st.sidebar.header("🔍 Filtros")
-
-    meses_disponiveis = sorted(
-        set(df["Mes"].dropna().tolist() + df_designados["Mes"].dropna().tolist()) - {"NaT"}
-    )
-    if not meses_disponiveis:
-        st.warning("Não foi possível montar o filtro de mês. Verifique o formato das colunas de data.")
-        st.stop()
-    nomes_meses = {
-        "01": "janeiro", "02": "fevereiro", "03": "março", "04": "abril",
-        "05": "maio", "06": "junho", "07": "julho", "08": "agosto",
-        "09": "setembro", "10": "outubro", "11": "novembro", "12": "dezembro",
-    }
-    meses_labels = [f"{nomes_meses.get(m.split('-')[1], m.split('-')[1])}/{m.split('-')[0]}" for m in meses_disponiveis]
-    mes_map = dict(zip(meses_labels, meses_disponiveis))
-    if "filtro_mes_ano" not in st.session_state or st.session_state["filtro_mes_ano"] not in meses_labels:
-        st.session_state["filtro_mes_ano"] = meses_labels[0]
-    mes_selecionado_label = st.sidebar.selectbox("🗓️ Mês/Ano", meses_labels, key="filtro_mes_ano", on_change=_marcar_loading_filtros)
-    mes_selecionado = mes_map[mes_selecionado_label]
-
-    df_mes = df[df["Mes"] == mes_selecionado]
-    df_designados_mes = df_designados[df_designados["Mes"] == mes_selecionado]
-
-    datas_ordenadas = sorted(
-        set(df_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist() + df_designados_mes.dropna(subset=["Data_BR"])["Data_BR"].tolist()),
-        key=lambda x: pd.to_datetime(x, dayfirst=True, errors="coerce")
-    )
-    if not datas_ordenadas:
-        st.warning("Não foi possível montar o filtro de data para o mês selecionado.")
-        st.stop()
-    if "filtro_data" not in st.session_state or st.session_state["filtro_data"] not in datas_ordenadas:
-        st.session_state["filtro_data"] = datas_ordenadas[0]
-    data_selecionada = st.sidebar.selectbox("📅 Selecione a Data", datas_ordenadas, key="filtro_data", on_change=_marcar_loading_filtros)
-
-    df_f1 = df_mes[df_mes["Data_BR"] == data_selecionada]
-    df_designados_f1 = df_designados_mes[df_designados_mes["Data_BR"] == data_selecionada]
+    # Filtramos as instâncias de data selecionada localmente caso não tenham sido tratadas
+    df_f1 = df[df["Data_BR"] == data_selecionada]
+    df_designados_f1 = df_designados[df_designados["Data_BR"] == data_selecionada]
 
     co_selecionados = []
     todos_co = True
@@ -1858,7 +1798,7 @@ try:
     tem_col_co = (
         setor_norm == "NEGOCIACAO"
         and COL_CO
-        and COL_CO in df_mes.columns
+        and COL_CO in df_f1.columns
     )
 
     def _coletar_cos(df_base):
@@ -1877,8 +1817,6 @@ try:
 
     if tem_col_co:
         co_disponiveis = _coletar_cos(df_f1)
-        if not co_disponiveis and not df_mes.empty:
-            co_disponiveis = _coletar_cos(df_mes)
 
     if setor_norm == "NEGOCIACAO":
         todos_co = st.sidebar.checkbox(
@@ -1919,7 +1857,7 @@ try:
     tem_col_municipio = (
         setor_norm == "NEGOCIACAO"
         and COL_MUNICIPIO
-        and COL_MUNICIPIO in df_mes.columns
+        and COL_MUNICIPIO in df_f1.columns
     )
 
     def _coletar_municipios(df_base):
@@ -1935,8 +1873,6 @@ try:
 
     if tem_col_municipio:
         municipios_disponiveis = _coletar_municipios(df_f1)
-        if not municipios_disponiveis and not df_mes.empty:
-            municipios_disponiveis = _coletar_municipios(df_mes)
 
     if setor_norm == "NEGOCIACAO":
         todos_municipios = st.sidebar.checkbox(
