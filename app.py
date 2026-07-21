@@ -522,6 +522,16 @@ def _supabase_generate_recovery_link(email):
     return data if isinstance(data, dict) else {}
 
 
+def _supabase_update_password(access_token, new_password):
+    return _supabase_request(
+        "PUT",
+        "/auth/v1/user",
+        use_service=False,
+        bearer_token=access_token,
+        json_data={"password": new_password},
+    )
+
+
 def _supabase_upsert_profile(profile):
     data = _supabase_request(
         "POST",
@@ -864,6 +874,80 @@ def _render_admin_painel():
     st.dataframe(df_logs[colunas], use_container_width=True, height=320)
 
 # --- Autenticação ---
+def _inject_recovery_hash_redirect():
+    """O Supabase entrega o token de recuperação no fragmento da URL (#access_token=...),
+    que nunca chega ao servidor Streamlit. Este script move o fragmento para a query
+    string (?access_token=...) para que o Python consiga lê-lo via st.query_params."""
+    components.html(
+        """
+        <script>
+        (function() {
+            const loc = window.parent.location;
+            const hash = loc.hash;
+            if (hash && hash.length > 1 && (hash.includes('access_token') || hash.includes('error'))) {
+                const parsed = new URLSearchParams(hash.substring(1));
+                const search = new URLSearchParams(loc.search);
+                parsed.forEach(function(value, key) { search.set(key, value); });
+                const newUrl = loc.pathname + '?' + search.toString();
+                // O iframe do components.html roda em sandbox sem "allow-top-navigation",
+                // então window.parent.location.replace() é bloqueado silenciosamente.
+                // Injetar o script no documento pai contorna essa restrição, pois ele
+                // passa a rodar no contexto (não sandboxado) da própria página.
+                const s = window.parent.document.createElement('script');
+                s.textContent = 'window.location.replace(' + JSON.stringify(newUrl) + ');';
+                window.parent.document.head.appendChild(s);
+            }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _handle_recovery_flow():
+    params = st.query_params
+    error_code = params.get("error_code")
+    error = params.get("error")
+    token_type = params.get("type")
+    access_token = params.get("access_token")
+
+    if error:
+        _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=440)
+        st.title("Link de recuperação inválido")
+        if error_code == "otp_expired":
+            st.error("Este link de recuperação expirou. Solicite um novo link na tela de login.")
+        else:
+            st.error(f"Não foi possível validar o link de recuperação ({error_code or error}).")
+        if st.button("Voltar para o login"):
+            st.query_params.clear()
+            st.rerun()
+        return True
+
+    if token_type == "recovery" and access_token:
+        _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=440)
+        st.title("Definir nova senha")
+        st.caption("Escolha uma nova senha para acessar o MAGO.")
+        with st.form("form_definir_nova_senha"):
+            nova_senha = st.text_input("Nova senha", type="password", key="nova_senha_recovery")
+            nova_senha_conf = st.text_input("Confirmar nova senha", type="password", key="nova_senha_recovery_conf")
+            enviar = st.form_submit_button("Salvar nova senha")
+        if enviar:
+            if not nova_senha or len(nova_senha) < 8:
+                st.error("A senha deve ter ao menos 8 caracteres.")
+            elif nova_senha != nova_senha_conf:
+                st.error("As senhas não conferem.")
+            else:
+                try:
+                    _supabase_update_password(access_token, nova_senha)
+                    st.query_params.clear()
+                    st.success("Senha atualizada com sucesso! Você já pode fazer login com a nova senha.")
+                except Exception as e:
+                    st.error(_formatar_erro(e))
+        return True
+
+    return False
+
+
 def tela_login():
     _render_logo_tema(LOGO_FULL_LIGHT_PATH, LOGO_FULL_DARK_PATH, max_width=440)
     st.title("Acesso ao MAGO")
@@ -935,6 +1019,10 @@ def tela_login():
                 except Exception as e:
                     st.error(_formatar_erro(e))
 
+
+_inject_recovery_hash_redirect()
+if _handle_recovery_flow():
+    st.stop()
 
 if "auth_user" not in st.session_state:
     if not st.session_state.get("intro_exibida"):
