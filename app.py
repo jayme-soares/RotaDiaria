@@ -746,6 +746,12 @@ def _logout(reason="manual"):
 
 
 def _render_admin_painel():
+    auth_user = st.session_state.get("auth_user")
+    auth_user = auth_user if isinstance(auth_user, dict) else {}
+    if (auth_user.get("role") or "").lower() != "admin":
+        st.error("Acesso restrito a administradores.")
+        st.stop()
+
     if "admin_refresh_token" not in st.session_state:
         st.session_state["admin_refresh_token"] = 0
 
@@ -1213,12 +1219,17 @@ def _carregar_turso(setor_ativo, data_alvo=None):
         # Usando o cliente oficial, muito mais seguro para extrair as colunas
         cliente = libsql_client.create_client_sync(url=cfg["url"], auth_token=cfg["token"])
         
+        # Nome da tabela vem de config fixo no código (não é input do usuário),
+        # então a interpolação aqui é segura. O valor de data_alvo, por sua vez,
+        # é vinculado como parâmetro (?) em vez de concatenado na query.
         sql = f'SELECT * FROM "{cfg["table"]}"'
+        params = []
         if data_alvo:
             # Filtro inteligente usando LIKE para puxar apenas o dia exato
-            sql += f" WHERE \"Data Fim\" LIKE '{data_alvo}%'"
-            
-        resultado = cliente.execute(sql)
+            sql += ' WHERE "Data Fim" LIKE ?'
+            params.append(f"{data_alvo}%")
+
+        resultado = cliente.execute(sql, params) if params else cliente.execute(sql)
         
         # Se não houve serviço no dia selecionado, retorna uma base vazia, 
         # MAS com os nomes das colunas mapeados para não gerar o erro no Streamlit!
@@ -1743,6 +1754,13 @@ if not setor_ativo:
     st.stop()
 
 setor_norm = _normalizar_setor_ativo(setor_ativo)
+
+# Revalida no servidor que o setor ativo está entre os setores liberados do
+# usuário autenticado — não confia apenas na lista de opções do selectbox.
+if setor_norm not in {_normalizar_setor_ativo(s) for s in setores_liberados}:
+    st.error("Você não tem permissão para acessar este setor.")
+    st.stop()
+
 if setor_norm not in {"SOC", "NEGOCIACAO"}:
     _render_logo_tema(LOGO_LIGHT_PATH, LOGO_DARK_PATH, max_width=220, container=main_logo_slot)
     st.info(f"O módulo do setor **{_setor_label(setor_ativo)}** está em desenvolvimento. Em breve.")
@@ -2343,7 +2361,10 @@ try:
                 nome_equipe = rastro["equipe"]
                 nome_arquivo = rastro["arquivo"]
                 cor_rastro = cores_equipe[(index + 2) % len(cores_equipe)]
-                placa_rastro = str(dados_rastro["Veiculo"].dropna().iloc[0]).strip() if "Veiculo" in dados_rastro.columns and not dados_rastro["Veiculo"].dropna().empty else nome_equipe
+                placa_rastro_raw = str(dados_rastro["Veiculo"].dropna().iloc[0]).strip() if "Veiculo" in dados_rastro.columns and not dados_rastro["Veiculo"].dropna().empty else nome_equipe
+                # "Veiculo" vem de um CSV enviado pelo usuário: precisa ser escapado
+                # antes de entrar em qualquer string HTML (tooltip/popup do Folium).
+                placa_rastro = html_lib.escape(placa_rastro_raw, quote=True)
 
                 dados_rastro_plot = _reduzir_pontos_trajeto_df(dados_rastro, limite=900)
                 coordenadas_rastro = dados_rastro_plot[["Latitude", "Longitude"]].values.tolist()
